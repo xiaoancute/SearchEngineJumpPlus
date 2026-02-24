@@ -39,6 +39,18 @@
 
 ## 更新历史
 
+- version 5.32.7 2026-02-24
+
+  - 修复：在 sandboxed frame 页面点击搜索引擎时，`target="_blank"` 被浏览器拦截（allow-popups 缺失）的问题
+  - 调整：新标签打开优先使用 `GM_openInTab`，避免页面沙箱弹窗限制
+  - 修复：点击图标子元素时目标识别不稳定导致跳转异常的问题
+
+- version 5.32.6 2026-02-24
+
+  - 修复：严格 CSP 页面中内联样式被拦截导致脚本样式失效、加载异常的问题
+  - 调整：Shadow DOM 样式注入优先使用 Constructable Stylesheets
+  - 调整：移除主要模板中的 inline style，严格 CSP 页面自动降级部分依赖内联样式的功能
+
 - version 5.32.5 2026-01-16
 
   - 修复：Google 搜索框 z-index 遮挡问题

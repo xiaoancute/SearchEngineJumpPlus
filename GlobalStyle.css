@@ -296,6 +296,14 @@ span.iqxin-additem.iqxin-set-active {
   border-radius: 4px;
   outline: none;
 }
+#newSearchBox #iqxin-newTarget {
+  border-radius: 4px;
+  border: none;
+  padding: 2px 0 2px 2px;
+}
+.iqxin-help-link {
+  color: #999;
+}
 #newSearchListBox input:focus,
 #newSearchBox input:focus {
   background: #f1d2d2;
@@ -344,6 +352,14 @@ span.iqxin-additem.iqxin-set-active {
 #iqxin-editCodeBox button {
   cursor: pointer;
 }
+#iqxin-editCodeBox textarea {
+  overflow: auto;
+  border-radius: 4px;
+}
+.iqxin-warning {
+  color: red;
+  font-size: 1.2em;
+}
 #xin-close {
   background: white;
   color: #3abdc1;
@@ -377,6 +393,11 @@ input#setBtnOpacityRange[type="range"] {
   appearance: none;
   background: -webkit-linear-gradient(left, #3abdc1, #83e7ea) no-repeat, #fff;
   border-radius: 10px; /*这个属性设置使填充进度条时的图形为圆角*/
+}
+.iqxin-setBtnOpacityRangeValue {
+  display: inline-block;
+  width: 3em;
+  text-align: center;
 }
 input#setBtnOpacityRange[type="range"]::-webkit-slider-thumb {
   appearance: none;
@@ -522,6 +543,11 @@ body[qxintheme="dark"] {
 #sej-expanded-category {
   font-weight: bold;
 }
+.sej-category-title {
+  font-weight: 600;
+  padding: 0 8px;
+  opacity: 0.8;
+}
 .sej-engine {
   padding: 0 13px;
   transition: background-color 0.2s ease-out;
@@ -554,7 +580,13 @@ body[qxintheme="dark"] {
 
 .sej-engine-icon {
   width: 16px;
+  height: 16px;
+  object-fit: cover;
+  display: inline-block;
   margin: 0;
+}
+.sej-engine-icon:not([src]) {
+  display: none;
 }
 
 .sej-drop-list {

@@ -3,9 +3,9 @@
 // @author         NLF & 锐经(修改) & iqxin(修改) & MUTED64(修改)
 // @contributor    MUTED64
 // @description    Fork版本搜索引擎跳转脚本，优化一些使用体验
-// @version        5.32.5
+// @version        5.32.7
 // @created        2011-07-02
-// @lastUpdated    2026-01-16
+// @lastUpdated    2026-02-24
 
 // @namespace      https://greasyfork.org/en/scripts/454280-searchenginejumpplus
 // @homepage       https://github.com/MUTED64/SearchEngineJumpPlus
@@ -42,7 +42,8 @@
   class ShadowDOMManager {
     static shadowHost = null;
     static shadowRoot = null;
-    
+    static constructableSheets = [];
+
     static initialize() {
       if (this.shadowHost) return this.shadowRoot;
       
@@ -92,24 +93,73 @@
     }
     
     static addStyle(cssText) {
+      if (!cssText) return;
       if (!this.shadowRoot) this.initialize();
-      
-      const style = document.createElement('style');
+
+      if (this.#supportsConstructableStylesheets()) {
+        try {
+          const sheet = new CSSStyleSheet();
+          sheet.replaceSync(cssText);
+          this.constructableSheets.push(sheet);
+          this.shadowRoot.adoptedStyleSheets = [
+            ...this.shadowRoot.adoptedStyleSheets,
+            sheet,
+          ];
+          return;
+        } catch (e) {
+          console.warn("Constructable stylesheet 注入失败，回退到 <style> 注入", e);
+        }
+      }
+
+      const style = document.createElement("style");
+      const nonce = this.#getCSPNonce();
+      if (nonce) {
+        style.setAttribute("nonce", nonce);
+      }
       style.textContent = cssText;
       this.shadowRoot.appendChild(style);
     }
-    
-    static applyHostStyle(cssText) {
-      // 将样式应用到 Shadow host（主文档元素）
-      if (!this.shadowHost) this.initialize();
-      this.shadowHost.style.cssText += cssText;
+
+    static #supportsConstructableStylesheets() {
+      return (
+        typeof CSSStyleSheet !== "undefined" &&
+        typeof ShadowRoot !== "undefined" &&
+        "replaceSync" in CSSStyleSheet.prototype &&
+        "adoptedStyleSheets" in ShadowRoot.prototype
+      );
     }
-    
+
+    static #getCSPNonce() {
+      const nonceElement = document.querySelector("style[nonce], script[nonce]");
+      return nonceElement?.nonce || nonceElement?.getAttribute("nonce") || "";
+    }
+
     static getRoot() {
       if (!this.shadowRoot) this.initialize();
       return this.shadowRoot;
     }
   }
+
+  const CSPCompat = {
+    _inlineStyleBlocked: null,
+    isInlineStyleBlocked() {
+      if (this._inlineStyleBlocked !== null) {
+        return this._inlineStyleBlocked;
+      }
+
+      try {
+        const probe = document.createElement("div");
+        document.documentElement.appendChild(probe);
+        probe.style.setProperty("position", "fixed");
+        this._inlineStyleBlocked = !probe.getAttribute("style");
+        probe.remove();
+      } catch (e) {
+        this._inlineStyleBlocked = false;
+      }
+
+      return this._inlineStyleBlocked;
+    },
+  };
 
   startScript();
   listenUrlChange();
@@ -186,6 +236,7 @@ function listenUrlChange() {
       // 重置 Shadow DOM 管理器
       ShadowDOMManager.shadowHost = null;
       ShadowDOMManager.shadowRoot = null;
+      ShadowDOMManager.constructableSheets = [];
       startScript();
     });
   }
@@ -199,7 +250,7 @@ function listenUrlChange() {
     const icon = {
       edit: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAQAAADZc7J/AAACDklEQVR4nJXVzUtUURjH8Y/mSNKkki2iwiApxHQ1q/6C+gusoCB6oxbRRqFNL4sWtRKqhVSLIDe1CqpNiwjKIilKLKKFEr2Z2qI0xxHN0+LOm+PMOPOc1T2H7/f5ncO991BdNer30zmxKrl0xV2zKJjRoy6aqkkvbbdVLPuUq+8+5uGXnVILki7qsxgtNDtrTNLcijHvrdYsft0/wQ8DZgSzeqMUDW4IJceYHcvwCd1ies0KZvWI1TnhIH6574Olgg0E74zmhZ902j304by4Cxp5LPjtQNmjy3XPVK2rgmCBCcGgdVXhdBgUBCMEwVMNVeIvBMFLifKC8vgrndFBlRJUhJcWFMd3ZfGuzFRxwWrdu3KTxQQVhi8lqApfKVhf0d4bc2/OckG9Pkur7r3TEw+1FRO0GxdM2Vc2/HHBgr1If935UTfigbt5+C27MeSo9+m5GJYitlCwWR2G8oQZ/FgWX1aFgnZMG852v5nFR4rhMn+2dDVJYFpKqy0SDksUhF9FsE0bWgyIa9bIanihoEUcDTrSz4ueOVMOLxQkzVkrZcaoNz755rmpcnihYNghm3w26Ys/5cGcIKgRBJDyqCIquj8C1PqKZvHK+qVrJ5bMRwmGterU64pkkZupWO3RjXkzUZj9+jVZMGK6IsEaHTbgjpOSUYZL/pa5m4qPIbtyznpHvJaqGB53O33h4T/3VzLuzDhE6AAAAABJRU5ErkJggg==",
       del: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAADAFBMVEUAAADsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVH///9VVVVWVlZXV1dYWFhZWVlaWlpbW1tcXFxdXV1eXl5fX19gYGBhYWFiYmJjY2NkZGRlZWVmZmZnZ2doaGhpaWlqampra2tsbGxtbW1ubm5vb29wcHBxcXFycnJzc3N0dHR1dXV2dnZ3d3d4eHh5eXl6enp7e3t8fHx9fX1+fn5/f3+AgICBgYGCgoKDg4OEhISFhYWGhoaHh4eIiIiJiYmKioqLi4uMjIyNjY2Ojo6Pj4+QkJCRkZGSkpKTk5OUlJSVlZWWlpaXl5eYmJiZmZmampqbm5ucnJydnZ2enp6fn5+goKChoaGioqKjo6OkpKSlpaWmpqanp6eoqKipqamqqqqrq6usrKytra2urq6vr6+wsLCxsbGysrKzs7O0tLS1tbW2tra3t7e4uLi5ubm6urq7u7u8vLy9vb2+vr6/v7/AwMDBwcHCwsLDw8PExMTFxcXGxsbHx8fIyMjJycnKysrLy8vMzMzNzc3Ozs7Pz8/Q0NDR0dHS0tLT09PU1NTV1dXW1tbX19fY2NjZ2dna2trb29vc3Nzd3d3e3t7f39/g4ODh4eHi4uLj4+Pk5OTl5eXm5ubn5+fo6Ojp6enq6urr6+vs7Ozt7e3u7u7v7+/w8PDx8fHy8vLz8/P09PT19fX29vb39/f4+Pj5+fn6+vr7+/v8/Pz9/f3+/v7///8dej9TAAAAU3RSTlMAAABm7P/sZgAAABPO////zhQAAB/i/////////+IfAAAe4fvk4AAAAAAd/+Q3GxwAFR85FQBjz+LPY+v////r6//////rZM/h4c9jABUdHRUAAP0EcPoAAAEuSURBVHic7ZRnc8IwDIbdEUZHGB0kDsMOMcOMttBBB93Qvcj//y9VjB0Czh13/dz3ixT5OVmSYyMktLK6tm74oYxEMpVGUW1sbm2bM8DMZHP5OWBnd2+/YNnYAWHbKhRL5cocQKjrWFWPuSDmVS3HpUQu1eoNQkiTM9xqd7oHoG6n3cKMNyHcqNfQ4VGPUsr7nh0FbK/PIdw7PkGnZwOZNrqF9AfnF+jyaigLixYp/eH1Dbq9u4eAHyOAHh5HaPz0DCnjANjm5fUNvX98QoGCxyo5Fjmh0K/vH2hzAi0KnqnymMgJrU6gzemQBM+DZpX1/XBYUyAYTTAuZTUg+Aw8Zf+BvwJLR730sPTjXgD0H2YB0BUClXKpGAeE1y+fy2ZMfX12gdOpZMLQAfkE/AL7e5vGZF+dOQAAAABJRU5ErkJggg==",
-      setting: `<svg style="width: 16px;" class="icon" id="sej-setting-button" viewBox="0 0 512 512"><path d="M262.29 192.31a64 64 0 1057.4 57.4 64.13 64.13 0 00-57.4-57.4zM416.39 256a154.34 154.34 0 01-1.53 20.79l45.21 35.46a10.81 10.81 0 012.45 13.75l-42.77 74a10.81 10.81 0 01-13.14 4.59l-44.9-18.08a16.11 16.11 0 00-15.17 1.75A164.48 164.48 0 01325 400.8a15.94 15.94 0 00-8.82 12.14l-6.73 47.89a11.08 11.08 0 01-10.68 9.17h-85.54a11.11 11.11 0 01-10.69-8.87l-6.72-47.82a16.07 16.07 0 00-9-12.22 155.3 155.3 0 01-21.46-12.57 16 16 0 00-15.11-1.71l-44.89 18.07a10.81 10.81 0 01-13.14-4.58l-42.77-74a10.8 10.8 0 012.45-13.75l38.21-30a16.05 16.05 0 006-14.08c-.36-4.17-.58-8.33-.58-12.5s.21-8.27.58-12.35a16 16 0 00-6.07-13.94l-38.19-30A10.81 10.81 0 0149.48 186l42.77-74a10.81 10.81 0 0113.14-4.59l44.9 18.08a16.11 16.11 0 0015.17-1.75A164.48 164.48 0 01187 111.2a15.94 15.94 0 008.82-12.14l6.73-47.89A11.08 11.08 0 01213.23 42h85.54a11.11 11.11 0 0110.69 8.87l6.72 47.82a16.07 16.07 0 009 12.22 155.3 155.3 0 0121.46 12.57 16 16 0 0015.11 1.71l44.89-18.07a10.81 10.81 0 0113.14 4.58l42.77 74a10.8 10.8 0 01-2.45 13.75l-38.21 30a16.05 16.05 0 00-6.05 14.08c.33 4.14.55 8.3.55 12.47z" fill="none" stroke="var(--font-color-qxin)" stroke-linecap="round" stroke-linejoin="round" stroke-width="42"/></svg>`,
+      setting: `<svg width="16" class="icon" id="sej-setting-button" viewBox="0 0 512 512"><path d="M262.29 192.31a64 64 0 1057.4 57.4 64.13 64.13 0 00-57.4-57.4zM416.39 256a154.34 154.34 0 01-1.53 20.79l45.21 35.46a10.81 10.81 0 012.45 13.75l-42.77 74a10.81 10.81 0 01-13.14 4.59l-44.9-18.08a16.11 16.11 0 00-15.17 1.75A164.48 164.48 0 01325 400.8a15.94 15.94 0 00-8.82 12.14l-6.73 47.89a11.08 11.08 0 01-10.68 9.17h-85.54a11.11 11.11 0 01-10.69-8.87l-6.72-47.82a16.07 16.07 0 00-9-12.22 155.3 155.3 0 01-21.46-12.57 16 16 0 00-15.11-1.71l-44.89 18.07a10.81 10.81 0 01-13.14-4.58l-42.77-74a10.8 10.8 0 012.45-13.75l38.21-30a16.05 16.05 0 006-14.08c-.36-4.17-.58-8.33-.58-12.5s.21-8.27.58-12.35a16 16 0 00-6.07-13.94l-38.19-30A10.81 10.81 0 0149.48 186l42.77-74a10.81 10.81 0 0113.14-4.59l44.9 18.08a16.11 16.11 0 0015.17-1.75A164.48 164.48 0 01187 111.2a15.94 15.94 0 008.82-12.14l6.73-47.89A11.08 11.08 0 01213.23 42h85.54a11.11 11.11 0 0110.69 8.87l6.72 47.82a16.07 16.07 0 009 12.22 155.3 155.3 0 0121.46 12.57 16 16 0 0015.11 1.71l44.89-18.07a10.81 10.81 0 0113.14 4.58l42.77 74a10.8 10.8 0 01-2.45 13.75l-38.21 30a16.05 16.05 0 00-6.05 14.08c.33 4.14.55 8.3.55 12.47z" fill="none" stroke="var(--font-color-qxin)" stroke-linecap="round" stroke-linejoin="round" stroke-width="42"/></svg>`,
     };
 
     const scriptSettingData = {
@@ -706,7 +757,7 @@ function listenUrlChange() {
 
     class JumpBar {
       engineButtonTemplate =
-        '<a class="sej-engine" target="$blank$" data-iqxincategory="$category$" encoding="$encoding$" gbk="$gbk$" url="$url$"><div class="sej-engine-icon" style="background-image: url(&quot;$favicon$&quot;); background-size: cover; width: 16px; height: 16px; display: inline-block;"></div>$name$</a>';
+        '<a class="sej-engine" target="$blank$" data-iqxincategory="$category$" encoding="$encoding$" gbk="$gbk$" url="$url$"><img class="sej-engine-icon" src="$favicon$" alt="">$name$</a>';
       dropDownLists = [];
       container;
       inputTarget;
@@ -715,17 +766,22 @@ function listenUrlChange() {
       matchedRule;
       engineList;
       settingData;
+      inlineStyleBlocked;
 
       constructor(engineList, settingData, matchedRule) {
         this.engineList = engineList;
         this.settingData = settingData;
         this.matchedRule = matchedRule;
+        this.inlineStyleBlocked = CSPCompat.isInlineStyleBlocked();
         const inited = this.#initContainer();
         if (inited === false) return;
         this.#initEngines();
         this.#addEnginesToDOM();
         this.#addStyle();
-        if (this.settingData.fixedTop && this.matchedRule) {
+        if (this.settingData.fixedTop && this.matchedRule && this.inlineStyleBlocked) {
+          console.warn("检测到 CSP 阻止内联样式，已禁用 fixedTop 功能");
+        }
+        if (this.settingData.fixedTop && this.matchedRule && !this.inlineStyleBlocked) {
           const originalContainerDistanceTop =
             this.container.getBoundingClientRect().top + window.scrollY;
           // 判断是否需要只在向上滚动时显示
@@ -770,6 +826,10 @@ function listenUrlChange() {
             );
           }
         } else if (this.#isOnSelectSearchMode()) {
+          if (this.inlineStyleBlocked) {
+            console.warn("检测到 CSP 阻止内联样式，已禁用划词搜索模式");
+            return false;
+          }
           this.inputTarget = {};
           this.insertTarget = document.body;
           this.insertPositionLabel = "beforeend";
@@ -820,6 +880,7 @@ function listenUrlChange() {
         );
       }
       #toggleSelectSearchJumpBar() {
+        if (this.inlineStyleBlocked) return;
         const selection = getSelection();
         if (selection.isCollapsed) {
           this.container.style.top = "-50px";
@@ -907,6 +968,12 @@ function listenUrlChange() {
 
           engines = engines.join("");
 
+          // CSP 严格页面：禁用下拉菜单（需要大量 inline style），改为平铺分类
+          if (self.inlineStyleBlocked) {
+            self.container.innerHTML += `<span class="sej-category-title">${cName}</span>${engines}`;
+            return;
+          }
+
           // 展开当前搜索分类列表
           if (
             !self.settingData.foldlist &&
@@ -927,7 +994,7 @@ function listenUrlChange() {
 
             // 隐藏主搜索菜单的图标
             if (!self.settingData.icon) {
-              cName = "";
+              jumpBarButton.querySelector(".sej-engine-icon")?.remove();
             }
 
             jumpBarButton.lastChild.nodeValue = cName;
@@ -1012,6 +1079,7 @@ function listenUrlChange() {
         // 吸附顶部时的占位
         // 当需要 wrapper 行为时，给 Shadow host 设置占位样式
         if (
+          !this.inlineStyleBlocked &&
           getComputedStyle(this.container).position !== "sticky" &&
           this.needsWrapper &&
           !this.#isOnSelectSearchMode()
@@ -1026,7 +1094,7 @@ function listenUrlChange() {
         }
       }
       #fixedToTop(fixedTop, color, originalContainerDistanceTop) {
-        if (!this.container) {
+        if (!this.container || this.inlineStyleBlocked) {
           return;
         }
 
@@ -1085,10 +1153,12 @@ function listenUrlChange() {
         }
       }
       #jumpToSelectedEngine(e) {
-        const target = e.target;
+        const target =
+          e.currentTarget?.classList?.contains("sej-engine")
+            ? e.currentTarget
+            : e.target?.closest?.(".sej-engine");
 
         if (!target) return;
-        if (!target.classList.contains("sej-engine")) return;
 
         let searchKeyword;
         if (typeof this.inputTarget == "function") {
@@ -1116,6 +1186,8 @@ function listenUrlChange() {
         }
 
         let targetURL = target.getAttribute("url");
+        const openInNewTab =
+          this.#isOnSelectSearchMode() || target.getAttribute("target") === "_blank";
 
         // 一键搜索
         if (
@@ -1134,7 +1206,9 @@ function listenUrlChange() {
             var href = list[i].url.replaceAll("%s", searchKeyword);
             GM_openInTab(href);
           }
-          target.setAttribute("onclick", "return false;");
+          target.addEventListener("click", (event) => event.preventDefault(), {
+            once: true,
+          });
           return;
         }
 
@@ -1150,21 +1224,45 @@ function listenUrlChange() {
               targetURL.substring(postSign + 6),
               decodeURIComponent(searchKeyword),
             ],
-            target.getAttribute("target")
+            openInNewTab ? "_blank" : "_top"
           );
           document.body.appendChild(f);
           f.submit();
-        } else {
-          target.href = target
-            .getAttribute("url")
-            .replaceAll("%s", searchKeyword);
+          return;
         }
 
-        if (this.#isOnSelectSearchMode()) {
-          target.target = "_blank";
+        const resolvedURL = targetURL?.replaceAll("%s", searchKeyword);
+
+        // 避免在 sandboxed frame 中触发 target=_blank（会被浏览器拦截）
+        // 优先使用 GM_openInTab 由扩展层打开新标签页
+        if (openInNewTab) {
+          target.addEventListener("click", (event) => event.preventDefault(), {
+            once: true,
+          });
+
+          if (!this.#openInTabByGM(resolvedURL)) {
+            target.href = resolvedURL;
+            target.target = "_top";
+          }
+          return;
         }
-        if (target?.target !== "_blank") {
-          target.target = "_top";
+
+        target.href = resolvedURL;
+        target.target = "_top";
+      }
+      #openInTabByGM(url) {
+        if (!url) return false;
+        try {
+          GM_openInTab(url, { active: true, insert: true, setParent: true });
+          return true;
+        } catch (e) {
+          try {
+            GM_openInTab(url);
+            return true;
+          } catch (err) {
+            console.warn("GM_openInTab 打开失败，回退到页面内跳转", err);
+            return false;
+          }
         }
       }
       #getElementBySelector(selector) {
@@ -1175,13 +1273,15 @@ function listenUrlChange() {
             .singleNodeValue;
         }
       }
-      #getEngineJumpPostForm(url, value, newTab) {
+      #getEngineJumpPostForm(url, value, targetName) {
         const postForm = document.createElement("form");
         postForm.method = "post";
         postForm.action = url;
         postForm.style.cssText = "display:none;";
         postForm.innerHTML = `<input type="hidden" name="${value[0]}" value="${value[1]}"/>`;
-        newTab ? (postForm.target = "_blank") : {};
+        if (targetName) {
+          postForm.target = targetName;
+        }
         return postForm;
       }
     }
@@ -1280,7 +1380,7 @@ function listenUrlChange() {
           ' data-iqxintarget="$blank$" ' +
           ' data-iqxindisabled="$disabled$" ' +
           ' data-iqxingbk="$gbk$" ' +
-          '><div class="sej-engine-icon" style="background-image: url(&quot;$favicon$&quot;); background-size: cover; width: 16px; height: 16px; display: inline-block;"></div><span>$name$</span></span>' +
+          '><img class="sej-engine-icon" src="$favicon$" alt=""><span>$name$</span></span>' +
           ' <span class="iqxin-set-edit" title="编辑 Edit"><img class="sej-engine-icon" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAQAAADZc7J/AAACDklEQVR4nJXVzUtUURjH8Y/mSNKkki2iwiApxHQ1q/6C+gusoCB6oxbRRqFNL4sWtRKqhVSLIDe1CqpNiwjKIilKLKKFEr2Z2qI0xxHN0+LOm+PMOPOc1T2H7/f5ncO991BdNer30zmxKrl0xV2zKJjRoy6aqkkvbbdVLPuUq+8+5uGXnVILki7qsxgtNDtrTNLcijHvrdYsft0/wQ8DZgSzeqMUDW4IJceYHcvwCd1ies0KZvWI1TnhIH6574Olgg0E74zmhZ902j304by4Cxp5LPjtQNmjy3XPVK2rgmCBCcGgdVXhdBgUBCMEwVMNVeIvBMFLifKC8vgrndFBlRJUhJcWFMd3ZfGuzFRxwWrdu3KTxQQVhi8lqApfKVhf0d4bc2/OckG9Pkur7r3TEw+1FRO0GxdM2Vc2/HHBgr1If935UTfigbt5+C27MeSo9+m5GJYitlCwWR2G8oQZ/FgWX1aFgnZMG852v5nFR4rhMn+2dDVJYFpKqy0SDksUhF9FsE0bWgyIa9bIanihoEUcDTrSz4ueOVMOLxQkzVkrZcaoNz755rmpcnihYNghm3w26Ys/5cGcIKgRBJDyqCIquj8C1PqKZvHK+qVrJ5bMRwmGterU64pkkZupWO3RjXkzUZj9+jVZMGK6IsEaHTbgjpOSUYZL/pa5m4qPIbtyznpHvJaqGB53O33h4T/3VzLuzDhE6AAAAABJRU5ErkJggg=="/></span>' +
           ' <span class="iqxin-set-del" title="删除 Delete"><img class="sej-engine-icon" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAADAFBMVEUAAADsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVH///9VVVVWVlZXV1dYWFhZWVlaWlpbW1tcXFxdXV1eXl5fX19gYGBhYWFiYmJjY2NkZGRlZWVmZmZnZ2doaGhpaWlqampra2tsbGxtbW1ubm5vb29wcHBxcXFycnJzc3N0dHR1dXV2dnZ3d3d4eHh5eXl6enp7e3t8fHx9fX1+fn5/f3+AgICBgYGCgoKDg4OEhISFhYWGhoaHh4eIiIiJiYmKioqLi4uMjIyNjY2Ojo6Pj4+QkJCRkZGSkpKTk5OUlJSVlZWWlpaXl5eYmJiZmZmampqbm5ucnJydnZ2enp6fn5+goKChoaGioqKjo6OkpKSlpaWmpqanp6eoqKipqamqqqqrq6usrKytra2urq6vr6+wsLCxsbGysrKzs7O0tLS1tbW2tra3t7e4uLi5ubm6urq7u7u8vLy9vb2+vr6/v7/AwMDBwcHCwsLDw8PExMTFxcXGxsbHx8fIyMjJycnKysrLy8vMzMzNzc3Ozs7Pz8/Q0NDR0dHS0tLT09PU1NTV1dXW1tbX19fY2NjZ2dna2trb29vc3Nzd3d3e3t7f39/g4ODh4eHi4uLj4+Pk5OTl5eXm5ubn5+fo6Ojp6enq6urr6+vs7Ozt7e3u7u7v7+/w8PDx8fHy8vLz8/P09PT19fX29vb39/f4+Pj5+fn6+vr7+/v8/Pz9/f3+/v7///8dej9TAAAAU3RSTlMAAABm7P/sZgAAABPO////zhQAAB/i/////////+IfAAAe4fvk4AAAAAAd/+Q3GxwAFR85FQBjz+LPY+v////r6//////rZM/h4c9jABUdHRUAAP0EcPoAAAEuSURBVHic7ZRnc8IwDIbdEUZHGB0kDsMOMcOMttBBB93Qvcj//y9VjB0Czh13/dz3ixT5OVmSYyMktLK6tm74oYxEMpVGUW1sbm2bM8DMZHP5OWBnd2+/YNnYAWHbKhRL5cocQKjrWFWPuSDmVS3HpUQu1eoNQkiTM9xqd7oHoG6n3cKMNyHcqNfQ4VGPUsr7nh0FbK/PIdw7PkGnZwOZNrqF9AfnF+jyaigLixYp/eH1Dbq9u4eAHyOAHh5HaPz0DCnjANjm5fUNvX98QoGCxyo5Fjmh0K/vH2hzAi0KnqnymMgJrU6gzemQBM+DZpX1/XBYUyAYTTAuZTUg+Aw8Zf+BvwJLR730sPTjXgD0H2YB0BUClXKpGAeE1y+fy2ZMfX12gdOpZMLQAfkE/AL7e5vGZF+dOQAAAABJRU5ErkJggg=="></span>' +
           "</span>";
@@ -1385,38 +1485,38 @@ function listenUrlChange() {
           "<span id='xin-selectSearch' title='划词搜索, 只有非搜索页面才会生效, 开关功能需要刷新页面'>" +
           "<label>划词搜索<input id='iqxin-selectSearch' type='checkbox' name='' " +
           selectSearch_checked +
-          " style='vertical-align:middle;'></label>" +
+          "'></label>" +
           "</span>" +
           "<span id='xin-transtion' title='动画,该设置需要刷新页面生效'>" +
           "<label>动画<input id='iqxin-transtion' type='checkbox' name='' " +
           transition_checked +
-          " style='vertical-align:middle;'></label>" +
+          "'></label>" +
           "</span>" +
           "<span id='xin-foldlists' title='将当前所在搜索分类折叠'>" +
           "<label>折叠当前搜索分类<input id='iqxin-foldlist' type='checkbox' name='' " +
           foldlist_checked +
-          " style='vertical-align:middle;'></label>" +
+          "'></label>" +
           "</span>" +
           "<span id='iqxin-fixedTopS' title='fixedTop 当滚动页面时,固定到页面顶端。某些页面的样式存在问题'>" +
           "<label>固定到顶端<input id='iqxin-fixedTop' type='checkbox' name='' " +
           fixedTop_checked +
-          " style='vertical-align:middle;'></label>" +
+          "'></label>" +
           "</span>" +
           "<span id='iqxin-fixedTopUpward' title='固定到顶端后,仅向上滚动才显示,需要刷新网页生效'>" +
           "<label>仅上拉显示<input id='iqxin-fixedTopUpward-item' type='checkbox' name='' " +
           fixedTopUpward_checked +
-          " style='vertical-align:middle;'></label>" +
+          "'></label>" +
           "</span>" +
           "<span id='xin-HideTheSameLink' title='隐藏同站链接,如果想在同一个搜索网站,但是想通过不同语言来搜索, 可以取消该选项'>" +
           "<label>隐藏同站链接<input id='iqxin-HideTheSameLink' type='checkbox' name='' " +
           HideTheSameLink_checked +
-          " style='vertical-align:middle;'></label>" +
+          "'></label>" +
           "</span>" +
           "<span id='xin-setBtnOpacity' title='设置按钮透明度,需要刷新页面'>设置按钮透明度 <input type='range' step='0.05'  min='0' max='1' value='" +
           (settingData.setBtnOpacity < 0
             ? -settingData.setBtnOpacity
             : settingData.setBtnOpacity) +
-          "' id='setBtnOpacityRange'><i style='display:inline-block;width:3em;text-align:center;' class='iqxin-setBtnOpacityRangeValue' title='按钮 显示/隐藏(非透明)),请确定知道自己如何再次打开; 火狐非高级玩家建议别禁用'></i></span>" +
+          "' id='setBtnOpacityRange'><i class='iqxin-setBtnOpacityRangeValue' title='按钮 显示/隐藏(非透明)),请确定知道自己如何再次打开; 火狐非高级玩家建议别禁用'></i></span>" +
           "</div>";
         // "<div><span>test</span></div>";
         btnEle2.innerHTML = btnStr2;
@@ -1433,7 +1533,7 @@ function listenUrlChange() {
           "<span id='xin-allOpen' title='后台打开该搜索分类的所有网站'>" +
           "<label>一键搜索<input id='iqxin-allOpen-item' type='checkbox' name='' " +
           allOpen_checked +
-          " style='vertical-align:middle;'></label>" +
+          "'></label>" +
           "</span>" +
           "<span id='xin-centerDisplay' title='center 居中显示。主要是兼容AC-baidu:重定向优化百度搜狗谷歌搜索_去广告_favicon_双列'>居中：" +
           "<select id='iqxin-center'>" +
@@ -1581,13 +1681,13 @@ function listenUrlChange() {
              <span>链&nbsp;&nbsp;&nbsp&nbsp&nbsp&nbsp&nbsp接 : </span><input id='iqxin-newLink' placeholder='必填' onfocus='this.select()' /> <br/><br/>
              <span>图&nbsp;&nbsp;&nbsp&nbsp&nbsp&nbsp&nbsp标 : </span><input id='iqxin-newIcon' placeholder='选填,留空则自动获取' onfocus='this.select()' /> <br/><br/>
              <span>打开方式 :
-             <select id="iqxin-newTarget" style="border-radius: 4px;border: none;padding: 2px 0 2px 2px">
+             <select id="iqxin-newTarget">
              <option value="default">新标签页打开</option>
              <option value="newtab">当前页打开</option>
              <select>
              </span>
              <br/><br/>
-             <span><a target='_blank' style='color:#999;' href='https://greasyfork.org/en/scripts/454280-searchenginejumpplus'>相关使用说明</a></span>
+             <span><a target='_blank' class='iqxin-help-link' href='https://greasyfork.org/en/scripts/454280-searchenginejumpplus'>相关使用说明</a></span>
              &nbsp;&nbsp;&nbsp&nbsp&nbsp&nbsp&nbsp;
              <button id='addItemBoxEnter' class='addItemBoxEnter addItemBoxBtn iqxin-enterBtn'>确定</button>&nbsp;&nbsp;&nbsp&nbsp&nbsp;&nbsp
              <button id='addItemBoxCancel' class='addItemBoxCancel addItemBoxBtn iqxin-closeBtn'>取消</button>`;
@@ -1616,7 +1716,7 @@ function listenUrlChange() {
           ' data-iqxintitle="$title$" ' +
           ' data-iqxinlink="$link$" ' +
           ' data-iqxintarget="$blank$" ' +
-          '><div class="sej-engine-icon" style="background-image: url(&quot;$favicon$&quot;); background-size: cover; width: 16px; height: 16px; display: inline-block;"></div>$name$</span>' +
+          '><img class="sej-engine-icon" src="$favicon$" alt="">$name$</span>' +
           '<span class="iqxin-set-edit" title="编辑 Edit">' +
           '<img class="sej-engine-icon" src="' +
           icon.edit +
@@ -1837,12 +1937,12 @@ function listenUrlChange() {
           <span>链&nbsp;&nbsp;&nbsp&nbsp&nbsp&nbsp&nbsp接 : </span><input id="iqxin-newLink" placeholder="必填" onfocus="this.select()" value="${olink}" /> <br/><br/>
           <span>图&nbsp;&nbsp;&nbsp&nbsp&nbsp&nbsp&nbsp标 : </span><input id="iqxin-newIcon" placeholder="选填,留空则自动获取" onfocus="this.select()" value="${oicon}" /> <br/><br/>
           <span>打开方式 :
-              <select id="iqxin-newTarget" style="border-radius: 4px;border: none;padding: 2px 0 2px 2px">
+              <select id="iqxin-newTarget">
                   ${strblank}
               <select>
           </span>
           <br/><br/>
-          <span style=""><label>GBK编码：<input type="checkbox" name="" id="iqxin-newGBK" ${strGBK} style="vertical-align:middle;"></label></span>
+          <span><label>GBK编码：<input type="checkbox" name="" id="iqxin-newGBK" ${strGBK}></label></span>
           &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
             <button id="editItemBoxEnter" class="editItemBoxEnter addItemBoxBtn iqxin-enterBtn">确定</button>&nbsp;&nbsp;&nbsp&nbsp&nbsp;&nbsp
           <button id="addItemBoxCancel" class="addItemBoxCancel addItemBoxBtn iqxin-closeBtn">取消</button>
@@ -1952,11 +2052,11 @@ function listenUrlChange() {
           "padding:10px 20px;";
         var innerH =
           " " +
-          "<p><span style='color:red;font-size:1.2em;'>! ! !</span></br>" +
+          "<p><span class='iqxin-warning'>! ! !</span></br>" +
           "此处有更多的设置选项,自由度更高,</br>" +
           "但设置错误会导致脚本无法运行" +
           "</p>" +
-          "<textarea wrap='off' cols='45' rows='20' style='overflow:auto;border-radius:4px;'>" +
+          "<textarea wrap='off' cols='45' rows='20'>" +
           JSON.stringify(userSetting, false, 4) +
           "</textarea>" +
           "<br>" +
@@ -2474,9 +2574,20 @@ function listenUrlChange() {
       constructor() {
         this.globalStyle = GM_getResourceText("GLOBAL_STYLE");
         this.nonTransitionStyle = `.sej-engine,.sej-drop-list-trigger,.sej-drop-list{transition:none!important;}#sej-container{animation:none!important;}.sej-drop-list {backdrop-filter:none!important;}`;
-        
+        this.cspCompatibilityStyle = `
+          .sej-engine-icon { width: 16px; height: 16px; object-fit: cover; display: inline-block; }
+          .sej-engine-icon:not([src]) { display: none; }
+          .sej-category-title { font-weight: 600; padding: 0 8px; opacity: 0.8; }
+          .iqxin-setBtnOpacityRangeValue { display: inline-block; width: 3em; text-align: center; }
+          #newSearchBox #iqxin-newTarget { border-radius: 4px; border: none; padding: 2px 0 2px 2px; }
+          .iqxin-help-link { color: #999; }
+          #iqxin-editCodeBox textarea { overflow: auto; border-radius: 4px; }
+          .iqxin-warning { color: red; font-size: 1.2em; }
+        `;
+
         // 将全局样式注入到 Shadow DOM
         this.addStyle(this.globalStyle);
+        this.addStyle(this.cspCompatibilityStyle);
         
         if (!settingData.transtion) {
           this.addStyle(this.nonTransitionStyle);
