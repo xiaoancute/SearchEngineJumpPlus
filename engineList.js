@@ -62,6 +62,44 @@ const searchEngineJumpPlusEngines = {
         "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAA4pJREFUOE89U31MlXUUfs7v994LuyJLkmllrljdgjCd/BHttow+VsqkGJ8i0NCt1qQWSDaXcSNzrCG25Wo28mNmfNyLF9TV0KL8g/xDEhUHGFpAboKOj7oB3nvf9z2n3WvxbGd7zvac5+zs7CEsgAAI/D6fFixOsu1wCgxyasHtudmpsYqtW0KQu2ICQf5rolMx1NZ6VWrq2kxt0HYGPCAxNakIMyeCaAJiHTHD8U2lpRuCuLsr6hSj8Hp/NtKeDFZDqEqEW8OWfZTM+WHLNm1alHCPk5wvOBS9C+gwmMsKC3JGFjxEmHzt31cKuEZpo5xaDvfkozfZgnOlmATWCJ2bum9w7PV3ElyJxj4SlW7FyYaSjTmT0UOotTXgJsM4S8rY+so31eddJFmk9U6AnxDbBimnJWx9ooHuQ9k7rroSkzsV4fLAlQs1u+vqmL71dzZoUQ+nD1woSR1qO4Kk+wvlxSIF5SIsTQaPXQNNjrD65bsZk8QTKPg0WWnti4iZUZ6fN07+9pP9Fsue4h9fDcjMqjO06+A6VkwYn4K43ZDfLsFc7YGjsTKC0cHnfqjY1vfP3MpeFvGWFOZ2Uqv/5N+mHckqPZDfj2VpXbJt7/P09EvEl85DkpfDFgsctwhG/Zth4+b1Zz5KL+5zp60JaKV7NhXkNMYMImxmlRXlXbTz3R8wueocn51QPDwA+9YN8LMvA181wBj8aUQHp1fJ6Yn5Zl9Hh4McPUWFGxvJ136y32bes6kw1ye5j3pYUTd2NjlxZx785yiQmQU5sEPUyHCzbh8q2//5fuey5Q/2MuAtKXqtk9r8nQ0C9ZBGuDj/2C4XOzBkq/gH1HtfAI+kQurfBn7/lUnxG9p//VCLL+BRyvCZZGaU5eWNU1tbwA3DEXtjwcX1p/lq6vtis5eVKw5J94ImbzAR+rRlZX+5uX5+CeJPKKLLQ1d6a+rqPmYSEfL5T1WKohqldHlK14fnMmZm11vAXoKsYKGmUAi7j+fVW65Exz4C0sF3siPhSPhaxIxQNBi1td1G2upgtYiuIuFWtsyjT/U0Ty+dvbmiK+utUXvxknVapIpIh4WlDMJaQGeE6I+FMHm9XvXY42szlabtROQRYlORjghbiUJ6QkEOR8LBr0s3lwaP+TrWOLQ+K+BbMYP/gxEl0ThDEpJMFUkhgVODbs/NTo9VbKkIxXQSLaGW46fSDA799S9ht7upjiopCgAAAABJRU5ErkJggg==",
     },
   ],
+  ai: [
+    {
+      name: "ChatGPT",
+      url: "https://chatgpt.com/?q=%s",
+      favicon: "https://chatgpt.com/favicon.ico",
+      blank: true,
+    },
+    {
+      name: "pplx",
+      url: "https://www.perplexity.ai/search?q=%s",
+      favicon: "https://www.perplexity.ai/favicon.ico",
+      blank: true,
+    },
+    {
+      name: "Gemini",
+      url: "https://gemini.google.com/app?q=%s",
+      favicon: "https://gemini.google.com/favicon.ico",
+      blank: true,
+    },
+    {
+      name: "Claude",
+      url: "https://claude.ai/new?q=%s",
+      favicon: "https://claude.ai/favicon.ico",
+      blank: true,
+    },
+    {
+      name: "Kimi",
+      url: "https://www.kimi.com/?q=%s",
+      favicon: "https://www.kimi.com/favicon.ico",
+      blank: true,
+    },
+    {
+      name: "秘塔搜索",
+      url: "https://metaso.cn/?q=%s",
+      favicon: "https://metaso.cn/favicon.ico",
+      blank: true,
+    },
+  ],
   video: [
     {
       name: "bilibili",

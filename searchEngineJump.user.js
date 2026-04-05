@@ -3,9 +3,9 @@
 // @author         NLF & 锐经(修改) & iqxin(修改) & MUTED64(修改)
 // @contributor    MUTED64
 // @description    Fork版本搜索引擎跳转脚本，优化一些使用体验
-// @version        5.32.7
+// @version        5.33.0
 // @created        2011-07-02
-// @lastUpdated    2026-02-24
+// @lastUpdated    2026-04-05
 
 // @namespace      https://greasyfork.org/en/scripts/454280-searchenginejumpplus
 // @homepage       https://github.com/MUTED64/SearchEngineJumpPlus
@@ -31,8 +31,8 @@
 // @grant          window.onurlchange
 // @run-at         document-idle
 
-// @downloadURL https://update.greasyfork.org/scripts/454280/SearchEngineJumpPlus%20%E6%90%9C%E7%B4%A2%E5%BC%95%E6%93%8E%E5%BF%AB%E6%8D%B7%E8%B7%B3%E8%BD%AC%2B.user.js
-// @updateURL https://update.greasyfork.org/scripts/454280/SearchEngineJumpPlus%20%E6%90%9C%E7%B4%A2%E5%BC%95%E6%93%8E%E5%BF%AB%E6%8D%B7%E8%B7%B3%E8%BD%AC%2B.meta.js
+// @downloadURL https://raw.githubusercontent.com/xiaoancute/SearchEngineJumpPlus/master/searchEngineJump.user.js
+// @updateURL https://raw.githubusercontent.com/xiaoancute/SearchEngineJumpPlus/master/searchEngineJump.user.js
 // ==/UserScript==
 
 (function () {
@@ -298,6 +298,7 @@ function listenUrlChange() {
       selectSearch: true,
       engineDetails: [
         ["网页", "web", true],
+        ["AI 搜索", "ai", true],
         ["翻译", "translate", true],
         ["知识", "knowledge", true],
         ["图片", "image", true],
@@ -488,13 +489,50 @@ function listenUrlChange() {
         }
       }
 
+      #ensureAiCategoryDefaults() {
+        let settingsChanged = false;
+
+        if (!Array.isArray(this.settingData.engineDetails)) {
+          this.settingData.engineDetails = this.#scriptSettingData.engineDetails.map(
+            (item) => [...item]
+          );
+          settingsChanged = true;
+        }
+
+        if (!this.settingData.engineDetails.some((item) => item[1] === "ai")) {
+          this.settingData.engineDetails.splice(1, 0, ["AI 搜索", "ai", true]);
+          settingsChanged = true;
+        }
+
+        if (!this.settingData.engineList || typeof this.settingData.engineList !== "object") {
+          this.settingData.engineList = {};
+          settingsChanged = true;
+        }
+
+        if (!Array.isArray(this.settingData.engineList.ai)) {
+          this.settingData.engineList.ai = this.#scriptSettingData.engineList.ai.map(
+            (item) => ({ ...item })
+          );
+          settingsChanged = true;
+        }
+
+        return settingsChanged;
+      }
+
       initSettings() {
+        let settingsChanged = false;
+
         if (this.#storedSettingData) {
           this.settingData = Object.assign({}, this.#storedSettingData);
           this.#checkSettingDataIntegrity();
           this.#checkUpdate();
         } else {
           this.settingData = this.#scriptSettingData;
+          GM_setValue("searchEngineJumpData", this.settingData);
+        }
+
+        settingsChanged = this.#ensureAiCategoryDefaults() || settingsChanged;
+        if (settingsChanged) {
           GM_setValue("searchEngineJumpData", this.settingData);
         }
 
