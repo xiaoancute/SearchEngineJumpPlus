@@ -63,3 +63,13 @@ assert.match(
   /const defaultAiEngines = Array\.isArray\(this\.\#scriptSettingData\.engineList\?\.ai\)\s*\?/,
   "AI backfill logic should guard against missing ai defaults instead of reading map from undefined"
 );
+assert.match(
+  userScriptSource,
+  /\^https\?:\\\/\\\//,
+  "AI migration should detect legacy http(s) favicon URLs from older saved settings"
+);
+assert.match(
+  userScriptSource,
+  /existingEngine\.favicon\s*=\s*defaultEngine\.favicon/,
+  "AI migration should replace legacy saved favicons with current embedded defaults"
+);

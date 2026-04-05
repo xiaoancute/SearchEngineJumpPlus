@@ -3,7 +3,7 @@
 // @author         NLF & 锐经(修改) & iqxin(修改) & MUTED64(修改)
 // @contributor    MUTED64
 // @description    Fork版本搜索引擎跳转脚本，优化一些使用体验
-// @version        5.33.2
+// @version        5.33.3
 // @created        2011-07-02
 // @lastUpdated    2026-04-05
 
@@ -518,6 +518,30 @@ function listenUrlChange() {
           );
           settingsChanged = true;
         }
+
+        const existingAiEngines = Array.isArray(this.settingData.engineList.ai)
+          ? this.settingData.engineList.ai
+          : [];
+
+        defaultAiEngines.forEach((defaultEngine) => {
+          const existingEngine = existingAiEngines.find(
+            (item) => item?.name === defaultEngine.name
+          );
+
+          if (!existingEngine) {
+            existingAiEngines.push({ ...defaultEngine });
+            settingsChanged = true;
+            return;
+          }
+
+          if (
+            typeof existingEngine.favicon !== "string" ||
+            /^https?:\/\//.test(existingEngine.favicon)
+          ) {
+            existingEngine.favicon = defaultEngine.favicon;
+            settingsChanged = true;
+          }
+        });
 
         return settingsChanged;
       }
