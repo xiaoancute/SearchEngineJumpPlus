@@ -3,7 +3,7 @@
 // @author         NLF & 锐经(修改) & iqxin(修改) & MUTED64(修改)
 // @contributor    MUTED64
 // @description    Fork版本搜索引擎跳转脚本，优化一些使用体验
-// @version        5.33.3
+// @version        5.33.4
 // @created        2011-07-02
 // @lastUpdated    2026-04-05
 
@@ -313,6 +313,139 @@ function listenUrlChange() {
       ],
       engineList: engineList,
     };
+
+    const BUILTIN_ENGINE_LOOKUP = buildBuiltInEngineLookup(
+      scriptSettingData.engineList
+    );
+
+    function getBuiltInEngineIdentity(category, engine) {
+      return [category, engine?.name || "", engine?.url || ""].join("::");
+    }
+
+    function buildBuiltInEngineLookup(defaultEngineList) {
+      const lookup = new Map();
+
+      Object.entries(defaultEngineList).forEach(([category, engines]) => {
+        if (!Array.isArray(engines)) return;
+
+        engines.forEach((engine) => {
+          lookup.set(getBuiltInEngineIdentity(category, engine), engine);
+        });
+      });
+
+      return lookup;
+    }
+
+    function findBuiltInEngineDefault(category, engine) {
+      return BUILTIN_ENGINE_LOOKUP.get(getBuiltInEngineIdentity(category, engine));
+    }
+
+    function parseEngineSiteURL(olink) {
+      let protocol;
+      let host;
+
+      if (olink.indexOf("://") !== -1) {
+        protocol = olink.split("://")[0] ? olink.split("://")[0] : "https";
+        host = olink.split("://")[1].split("/")[0];
+      } else {
+        protocol = "https";
+        host = olink.split("/")[0];
+      }
+
+      return {
+        protocol,
+        host,
+        siteURL: protocol + "://" + host,
+      };
+    }
+
+    function buildFaviconUrl(olink, getIconSetting, preferGoogle = true) {
+      const { protocol, host, siteURL } = parseEngineSiteURL(olink);
+      let iconURL;
+
+      if (isNaN(getIconSetting)) {
+        iconURL = getIconSetting;
+      } else {
+        switch (parseInt(getIconSetting, 10)) {
+          case 1:
+            iconURL = siteURL + "/favicon.ico";
+            break;
+          case 2:
+            iconURL = "https://www.google.com/s2/favicons?domain=" + siteURL;
+            break;
+          case 3:
+            iconURL =
+              "https://statics.dnspod.cn/proxy_favicon/_/favicon?domain=" + host;
+            break;
+        }
+      }
+
+      if (iconURL) {
+        return iconURL.replace("%s", siteURL);
+      }
+
+      if (preferGoogle) {
+        return "https://www.google.com/s2/favicons?domain=" + host;
+      }
+
+      return protocol + "://" + host + "/favicon.ico";
+    }
+
+    function getAutoFaviconCandidates(olink) {
+      const { protocol, host, siteURL } = parseEngineSiteURL(olink);
+
+      return [
+        protocol + "://" + host + "/favicon.ico",
+        "https://www.google.com/s2/favicons?domain=" + siteURL,
+        "https://www.google.com/s2/favicons?domain=" + host,
+        "https://statics.dnspod.cn/proxy_favicon/_/favicon?domain=" + host,
+      ];
+    }
+
+    function hasCustomEngineIcon(engine, category) {
+      if (engine?.customIcon === true || engine?.customIcon === "true") {
+        return true;
+      }
+
+      if (engine?.customIcon === false || engine?.customIcon === "false") {
+        return false;
+      }
+
+      if (!engine?.favicon) {
+        return false;
+      }
+
+      const defaultEngine = findBuiltInEngineDefault(category, engine);
+      if (!defaultEngine) {
+        return Boolean(engine.favicon);
+      }
+
+      const knownDefaultIcons = new Set([
+        defaultEngine.favicon,
+        ...getAutoFaviconCandidates(engine.url),
+      ]);
+
+      return !knownDefaultIcons.has(engine.favicon);
+    }
+
+    function resolveEngineFavicon(engine, category, currentSettingData) {
+      const defaultEngine = findBuiltInEngineDefault(category, engine);
+      const autoFavicon = buildFaviconUrl(
+        engine.url,
+        currentSettingData.getIcon,
+        true
+      );
+
+      if (hasCustomEngineIcon(engine, category) && engine.favicon) {
+        return engine.favicon;
+      }
+
+      if (defaultEngine) {
+        return autoFavicon || defaultEngine.favicon || engine.favicon || "";
+      }
+
+      return engine.favicon || autoFavicon || "";
+    }
     // --------------------可设置项结束------------------------
     class Settings {
       #storedSettingData = GM_getValue("searchEngineJumpData");
@@ -542,6 +675,25 @@ function listenUrlChange() {
             settingsChanged = true;
           }
         });
+
+        Object.entries(this.settingData.engineList).forEach(
+          ([category, engines]) => {
+            if (!Array.isArray(engines)) return;
+
+            engines.forEach((engine) => {
+              const defaultEngine = findBuiltInEngineDefault(category, engine);
+              if (!defaultEngine) return;
+
+              if (
+                engine.customIcon === undefined &&
+                hasCustomEngineIcon(engine, category)
+              ) {
+                engine.customIcon = true;
+                settingsChanged = true;
+              }
+            });
+          }
+        );
 
         return settingsChanged;
       }
@@ -998,11 +1150,17 @@ function listenUrlChange() {
               .replace("$name$", engine.name)
               .replace("$category$", category);
 
+            const resolvedFavicon = resolveEngineFavicon(
+              engine,
+              category,
+              self.settingData
+            );
+
             // 图标
-            if (engine.favicon) {
+            if (resolvedFavicon) {
               engineListButton = engineListButton.replace(
                 "$favicon$",
-                engine.favicon
+                resolvedFavicon
               );
             } else {
               engineListButton = engineListButton.replace(
@@ -1440,6 +1598,7 @@ function listenUrlChange() {
           '<span class="sej-engine"' +
           ' data-xin="$xin$" ' +
           ' data-iqxinimg="$img$" ' +
+          "$customIconAttr$" +
           ' data-iqxintitle="$title$" ' +
           ' data-iqxinlink="$link$" ' +
           ' data-iqxintarget="$blank$" ' +
@@ -1491,13 +1650,26 @@ function listenUrlChange() {
             if (!engineListItem[jj]) {
               break;
             }
+            const resolvedFavicon = resolveEngineFavicon(
+              engineListItem[jj],
+              details[j][1],
+              settingData
+            );
+            const customIcon = hasCustomEngineIcon(
+              engineListItem[jj],
+              details[j][1]
+            );
             var a = aPattern
               .replace("$name$", engineListItem[jj].name)
-              .replace("$favicon$", engineListItem[jj].favicon)
+              .replace("$favicon$", resolvedFavicon)
               .replace("$xin$", jj);
             // 添加属性
             a = a
-              .replace("$img$", engineListItem[jj].favicon)
+              .replace("$img$", engineListItem[jj].favicon || "")
+              .replace(
+                "$customIconAttr$",
+                customIcon ? ' data-iqxincustomicon="true" ' : ""
+              )
               .replace("$title$", engineListItem[jj].name)
               .replace("$link$", engineListItem[jj].url);
             if (engineListItem[jj].blank) {
@@ -1766,10 +1938,12 @@ function listenUrlChange() {
       // 内部逻辑,：添加新的搜索
       addItemEnger() {
         var otitle, olink, oimg, oblank;
+        var isCustomIcon;
         otitle = this.$("#iqxin-newTitle").value;
         olink = this.$("#iqxin-newLink").value;
         oimg = this.$("#iqxin-newIcon").value;
         oblank = this.$("#iqxin-newTarget").selectedIndex;
+        isCustomIcon = Boolean(oimg);
 
         if (!oimg) {
           oimg = this.getICON(olink);
@@ -1778,6 +1952,7 @@ function listenUrlChange() {
         var a =
           '<span class="sej-engine"' +
           ' data-iqxinimg="$img$" ' +
+          "$customIconAttr$" +
           ' data-iqxintitle="$title$" ' +
           ' data-iqxinlink="$link$" ' +
           ' data-iqxintarget="$blank$" ' +
@@ -1794,7 +1969,11 @@ function listenUrlChange() {
           "</span>";
 
         a = a
-          .replace("$img$", oimg)
+          .replace("$img$", isCustomIcon ? oimg : "")
+          .replace(
+            "$customIconAttr$",
+            isCustomIcon ? ' data-iqxincustomicon="true" ' : ""
+          )
           .replace("$title$", otitle)
           .replace(
             "$link$",
@@ -1832,51 +2011,7 @@ function listenUrlChange() {
       }
       // 获取图标
       getICON(olink) {
-        let ourl;
-        let mark;
-        let protocol;
-        let host;
-
-        if (olink.indexOf("://") !== -1) {
-          protocol = olink.split("://")[0] ? olink.split("://")[0] : "https";
-          host = olink.split("://")[1].split("/")[0];
-        } else {
-          protocol = "https";
-          host = olink.split("/")[0];
-        }
-
-        const siteURL = protocol + "://" + host;
-
-        if (isNaN(settingData.getIcon)) {
-          ourl = settingData.getIcon;
-        } else {
-          mark = parseInt(settingData.getIcon);
-          switch (mark) {
-            case 1:
-              ourl = siteURL + "/favicon.ico";
-              break;
-            case 2:
-              ourl = "https://www.google.com/s2/favicons?domain=" + siteURL;
-              break;
-            case 3:
-              ourl =
-                "https://statics.dnspod.cn/proxy_favicon/_/favicon?domain=" +
-                host;
-              break;
-          }
-        }
-
-        if (ourl) {
-          ourl = ourl.replace("%s", siteURL);
-          return ourl;
-        }
-        if (this.online) {
-          ourl = "https://www.google.com/s2/favicons?domain=" + host;
-          return ourl;
-        } else {
-          ourl = protocol + "://" + host + "/favicon.ico";
-          return ourl;
-        }
+        return buildFaviconUrl(olink, settingData.getIcon, this.online !== false);
       }
 
       // 界面, 框: 添加新的搜索列表
@@ -1972,6 +2107,7 @@ function listenUrlChange() {
         var otitle = target.dataset.iqxintitle;
         var olink = target.dataset.iqxinlink;
         var oicon = target.dataset.iqxinimg;
+        var ocustom = target.dataset.iqxincustomicon;
         var otarget = target.dataset.iqxintarget;
         var odisabled = target.dataset.iqxindisabled;
         let oGBK = target.dataset.iqxingbk;
@@ -2000,7 +2136,7 @@ function listenUrlChange() {
         var innerHTML = `
           <span>标&nbsp;&nbsp;&nbsp&nbsp&nbsp&nbsp&nbsp题 : </span><input id="iqxin-newTitle" placeholder="必填" onfocus="this.select()" value="${otitle}" /> <br/><br/>
           <span>链&nbsp;&nbsp;&nbsp&nbsp&nbsp&nbsp&nbsp接 : </span><input id="iqxin-newLink" placeholder="必填" onfocus="this.select()" value="${olink}" /> <br/><br/>
-          <span>图&nbsp;&nbsp;&nbsp&nbsp&nbsp&nbsp&nbsp标 : </span><input id="iqxin-newIcon" placeholder="选填,留空则自动获取" onfocus="this.select()" value="${oicon}" /> <br/><br/>
+          <span>图&nbsp;&nbsp;&nbsp&nbsp&nbsp&nbsp&nbsp标 : </span><input id="iqxin-newIcon" placeholder="选填,留空则自动获取" onfocus="this.select()" value="${ocustom ? oicon : ""}" /> <br/><br/>
           <span>打开方式 :
               <select id="iqxin-newTarget">
                   ${strblank}
@@ -2022,19 +2158,26 @@ function listenUrlChange() {
         this.$("#iqxin-newTitle").select();
       }
       addEditBoxEnger() {
-        var otitle, olink, oimg, oblank, ogbk;
+        var otitle, olink, oimg, oblank, ogbk, isCustomIcon, displayFavicon;
         otitle = this.$("#iqxin-newTitle").value;
         olink = this.$("#iqxin-newLink").value;
         oimg = this.$("#iqxin-newIcon").value;
         oblank = this.$("#iqxin-newTarget").selectedIndex;
         ogbk = this.$("#iqxin-newGBK").checked;
+        isCustomIcon = Boolean(oimg);
+        displayFavicon = oimg || this.getICON(olink);
 
         this.editTemp.dataset.iqxintitle = otitle;
         this.editTemp.lastChild.innerText = otitle; //文本节点
 
         this.editTemp.dataset.iqxinlink = olink;
-        this.editTemp.dataset.iqxinimg = oimg;
-        this.editTemp.firstChild.src = oimg;
+        this.editTemp.dataset.iqxinimg = isCustomIcon ? oimg : "";
+        this.editTemp.firstChild.src = displayFavicon;
+        if (isCustomIcon) {
+          this.editTemp.dataset.iqxincustomicon = "true";
+        } else {
+          this.editTemp.removeAttribute("data-iqxincustomicon");
+        }
 
         // 是否新标签页打开
         if (oblank) {
@@ -2528,6 +2671,9 @@ function listenUrlChange() {
             obj[id][ij].favicon = data[ii].dataset.iqxinimg;
             obj[id][ij].name = data[ii].dataset.iqxintitle;
             obj[id][ij].url = data[ii].dataset.iqxinlink;
+            if (data[ii].dataset.iqxincustomicon) {
+              obj[id][ij].customIcon = data[ii].dataset.iqxincustomicon;
+            }
             if (data[ii].dataset.iqxintarget) {
               obj[id][ij].blank = data[ii].dataset.iqxintarget;
             }

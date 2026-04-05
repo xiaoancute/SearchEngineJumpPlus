@@ -73,3 +73,28 @@ assert.match(
   /existingEngine\.favicon\s*=\s*defaultEngine\.favicon/,
   "AI migration should replace legacy saved favicons with current embedded defaults"
 );
+assert.match(
+  userScriptSource,
+  /function resolveEngineFavicon\(/,
+  "script should expose a shared favicon resolver for UI rendering"
+);
+assert.match(
+  userScriptSource,
+  /data-iqxincustomicon=/,
+  "settings panel DOM should persist whether an icon is custom"
+);
+assert.doesNotMatch(
+  userScriptSource,
+  /data-iqxincustomicon="\$customIcon\$"/,
+  "custom icon DOM state should be inserted as a whole attribute so empty values do not leave stray dataset markers behind"
+);
+assert.match(
+  userScriptSource,
+  /customIcon/,
+  "settings save flow should preserve custom icon intent"
+);
+assert.match(
+  userScriptSource,
+  /function findBuiltInEngineDefault\(/,
+  "script should be able to detect built-in engines for migration and auto-fetch behavior"
+);
