@@ -39,6 +39,21 @@ assert.match(
 );
 assert.match(
   userScriptSource,
-  /engineList\.ai\s*=\s*this\.\#scriptSettingData\.engineList\.ai\.map/,
+  /engineList\.ai\s*=\s*defaultAiEngines\.map/,
   "saved engineList should be backfilled with default AI engines when missing"
+);
+assert.match(
+  userScriptSource,
+  /@require\s+https:\/\/raw\.githubusercontent\.com\/xiaoancute\/SearchEngineJumpPlus\/master\/engineList\.js/,
+  "user script should load engineList from the same GitHub repository as the main script"
+);
+assert.match(
+  userScriptSource,
+  /@require\s+https:\/\/raw\.githubusercontent\.com\/xiaoancute\/SearchEngineJumpPlus\/master\/rules\.js/,
+  "user script should load rules from the same GitHub repository as the main script"
+);
+assert.match(
+  userScriptSource,
+  /const defaultAiEngines = Array\.isArray\(this\.\#scriptSettingData\.engineList\?\.ai\)\s*\?/,
+  "AI backfill logic should guard against missing ai defaults instead of reading map from undefined"
 );
