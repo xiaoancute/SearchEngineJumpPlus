@@ -27,6 +27,12 @@ assert.deepEqual(
   ["ChatGPT", "pplx", "Gemini", "Claude", "Kimi", "秘塔搜索"],
   "engineList.ai should expose the expected default AI engines"
 );
+assert.ok(
+  Array.from(engineList.ai).every(
+    (item) => typeof item.favicon === "string" && item.favicon.startsWith("data:image")
+  ),
+  "AI engine favicons should be embedded data URLs so they do not break on sites that block direct favicon access"
+);
 assert.match(
   userScriptSource,
   /\["AI 搜索",\s*"ai",\s*true\]/,

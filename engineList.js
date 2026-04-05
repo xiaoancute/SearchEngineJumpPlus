@@ -66,37 +66,43 @@ const searchEngineJumpPlusEngines = {
     {
       name: "ChatGPT",
       url: "https://chatgpt.com/?q=%s",
-      favicon: "https://chatgpt.com/favicon.ico",
+      favicon:
+        "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%23111111'/%3E%3Ctext x='32' y='41' text-anchor='middle' font-size='28' font-family='Arial,sans-serif' font-weight='700' fill='white'%3EC%3C/text%3E%3C/svg%3E",
       blank: true,
     },
     {
       name: "pplx",
       url: "https://www.perplexity.ai/search?q=%s",
-      favicon: "https://www.perplexity.ai/favicon.ico",
+      favicon:
+        "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%230f766e'/%3E%3Ctext x='32' y='41' text-anchor='middle' font-size='28' font-family='Arial,sans-serif' font-weight='700' fill='white'%3EP%3C/text%3E%3C/svg%3E",
       blank: true,
     },
     {
       name: "Gemini",
       url: "https://gemini.google.com/app?q=%s",
-      favicon: "https://gemini.google.com/favicon.ico",
+      favicon:
+        "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%234f46e5'/%3E%3Cpath d='M32 10l4.8 14.2L51 29l-14.2 4.8L32 48l-4.8-14.2L13 29l14.2-4.8L32 10z' fill='white'/%3E%3C/svg%3E",
       blank: true,
     },
     {
       name: "Claude",
       url: "https://claude.ai/new?q=%s",
-      favicon: "https://claude.ai/favicon.ico",
+      favicon:
+        "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%23d97706'/%3E%3Ctext x='32' y='41' text-anchor='middle' font-size='28' font-family='Arial,sans-serif' font-weight='700' fill='white'%3EA%3C/text%3E%3C/svg%3E",
       blank: true,
     },
     {
       name: "Kimi",
       url: "https://www.kimi.com/?q=%s",
-      favicon: "https://www.kimi.com/favicon.ico",
+      favicon:
+        "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%230b0b0b'/%3E%3Ctext x='32' y='41' text-anchor='middle' font-size='28' font-family='Arial,sans-serif' font-weight='700' fill='white'%3EK%3C/text%3E%3C/svg%3E",
       blank: true,
     },
     {
       name: "秘塔搜索",
       url: "https://metaso.cn/?q=%s",
-      favicon: "https://metaso.cn/favicon.ico",
+      favicon:
+        "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%232563eb'/%3E%3Ctext x='32' y='41' text-anchor='middle' font-size='28' font-family='Arial,sans-serif' font-weight='700' fill='white'%3EM%3C/text%3E%3C/svg%3E",
       blank: true,
     },
   ],
