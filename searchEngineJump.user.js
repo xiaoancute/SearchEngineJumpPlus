@@ -3,9 +3,9 @@
 // @author         NLF & 锐经(修改) & iqxin(修改) & MUTED64(修改)
 // @contributor    MUTED64
 // @description    Fork版本搜索引擎跳转脚本，优化一些使用体验
-// @version        5.33.4
+// @version        5.33.5
 // @created        2011-07-02
-// @lastUpdated    2026-04-05
+// @lastUpdated    2026-04-25
 
 // @namespace      https://greasyfork.org/en/scripts/454280-searchenginejumpplus
 // @homepage       https://github.com/xiaoancute/SearchEngineJumpPlus
@@ -161,6 +161,27 @@
     },
   };
 
+  let currentRuntime = null;
+  let activateSettingPanel = function () {};
+
+  function destroyCurrentRuntime() {
+    currentRuntime?.destroy?.();
+    currentRuntime = null;
+
+    if (ShadowDOMManager.shadowHost?.parentNode) {
+      ShadowDOMManager.shadowHost.parentNode.removeChild(ShadowDOMManager.shadowHost);
+    }
+
+    ShadowDOMManager.shadowHost = null;
+    ShadowDOMManager.shadowRoot = null;
+    ShadowDOMManager.constructableSheets = [];
+  }
+
+  function restartCurrentRuntime() {
+    destroyCurrentRuntime();
+    mainLogic();
+  }
+
   startScript();
   listenUrlChange();
 
@@ -228,15 +249,7 @@ function listenUrlChange() {
       const newURL = normalizeURL(decodeURI(e.url).replaceAll(" ", "+"));
       if (lastURL === newURL) return;
       lastURL = newURL;
-      // 清理 Shadow DOM 内容
-      const shadowHost = document.querySelector('#sej-shadow-host');
-      if (shadowHost) {
-        shadowHost.remove();
-      }
-      // 重置 Shadow DOM 管理器
-      ShadowDOMManager.shadowHost = null;
-      ShadowDOMManager.shadowRoot = null;
-      ShadowDOMManager.constructableSheets = [];
+      destroyCurrentRuntime();
       startScript();
     });
   }
@@ -314,138 +327,383 @@ function listenUrlChange() {
       engineList: engineList,
     };
 
-    const BUILTIN_ENGINE_LOOKUP = buildBuiltInEngineLookup(
-      scriptSettingData.engineList
-    );
-
-    function getBuiltInEngineIdentity(category, engine) {
-      return [category, engine?.name || "", engine?.url || ""].join("::");
-    }
-
-    function buildBuiltInEngineLookup(defaultEngineList) {
-      const lookup = new Map();
-
-      Object.entries(defaultEngineList).forEach(([category, engines]) => {
-        if (!Array.isArray(engines)) return;
-
-        engines.forEach((engine) => {
-          lookup.set(getBuiltInEngineIdentity(category, engine), engine);
-        });
-      });
-
-      return lookup;
-    }
-
-    function findBuiltInEngineDefault(category, engine) {
-      return BUILTIN_ENGINE_LOOKUP.get(getBuiltInEngineIdentity(category, engine));
-    }
-
-    function parseEngineSiteURL(olink) {
-      let protocol;
-      let host;
-
-      if (olink.indexOf("://") !== -1) {
-        protocol = olink.split("://")[0] ? olink.split("://")[0] : "https";
-        host = olink.split("://")[1].split("/")[0];
-      } else {
-        protocol = "https";
-        host = olink.split("/")[0];
+    // TESTABLE_HELPERS_START
+    function createCoreHelperApi(defaultEngineList) {
+      function isPlainObject(value) {
+        return Boolean(value) && typeof value === "object" && !Array.isArray(value);
       }
 
-      return {
-        protocol,
-        host,
-        siteURL: protocol + "://" + host,
-      };
-    }
+      function deepCloneData(value) {
+        return value === undefined ? value : JSON.parse(JSON.stringify(value));
+      }
 
-    function buildFaviconUrl(olink, getIconSetting, preferGoogle = true) {
-      const { protocol, host, siteURL } = parseEngineSiteURL(olink);
-      let iconURL;
+      function cloneEngineItem(item) {
+        return isPlainObject(item) ? { ...item } : item;
+      }
 
-      if (isNaN(getIconSetting)) {
-        iconURL = getIconSetting;
-      } else {
-        switch (parseInt(getIconSetting, 10)) {
-          case 1:
-            iconURL = siteURL + "/favicon.ico";
-            break;
-          case 2:
-            iconURL = "https://www.google.com/s2/favicons?domain=" + siteURL;
-            break;
-          case 3:
-            iconURL =
-              "https://statics.dnspod.cn/proxy_favicon/_/favicon?domain=" + host;
-            break;
+      function cloneEngineDetails(engineDetails) {
+        return Array.isArray(engineDetails)
+          ? engineDetails.map((item) => (Array.isArray(item) ? [...item] : item))
+          : [];
+      }
+
+      function normalizeTextInput(value) {
+        return typeof value === "string" ? value.trim() : "";
+      }
+
+      function normalizeEngineUrlInput(rawUrl) {
+        const trimmed = normalizeTextInput(rawUrl);
+        if (!trimmed) {
+          return "";
+        }
+
+        const candidate =
+          trimmed.indexOf("://") === -1 ? "https://" + trimmed : trimmed;
+        const validationCandidate = candidate.replace(/%s/g, "search-term");
+
+        try {
+          const parsedURL = new URL(validationCandidate);
+          if (parsedURL.protocol !== "http:" && parsedURL.protocol !== "https:") {
+            return "";
+          }
+          return candidate;
+        } catch (error) {
+          return "";
         }
       }
 
-      if (iconURL) {
-        return iconURL.replace("%s", siteURL);
+      function normalizeEngineIconInput(rawIcon) {
+        const trimmed = normalizeTextInput(rawIcon);
+        if (!trimmed) {
+          return "";
+        }
+
+        if (/^data:image\//i.test(trimmed)) {
+          return trimmed;
+        }
+
+        return normalizeEngineUrlInput(trimmed);
       }
 
-      if (preferGoogle) {
-        return "https://www.google.com/s2/favicons?domain=" + host;
+      function normalizeEngineItem(rawItem) {
+        if (!isPlainObject(rawItem)) {
+          return null;
+        }
+
+        const name = normalizeTextInput(rawItem.name);
+        const url = normalizeEngineUrlInput(rawItem.url);
+
+        if (!name || !url) {
+          return null;
+        }
+
+        const normalizedItem = { ...rawItem, name, url };
+        normalizedItem.favicon = normalizeEngineIconInput(rawItem.favicon);
+
+        if (rawItem.customIcon === true || rawItem.customIcon === "true") {
+          normalizedItem.customIcon = "true";
+        } else {
+          delete normalizedItem.customIcon;
+        }
+
+        return normalizedItem;
       }
 
-      return protocol + "://" + host + "/favicon.ico";
+      function normalizeEngineDetails(rawEngineDetails, defaultEngineDetails) {
+        if (!Array.isArray(rawEngineDetails)) {
+          return cloneEngineDetails(defaultEngineDetails);
+        }
+
+        const normalizedDetails = rawEngineDetails
+          .map((item) => {
+            if (!Array.isArray(item) || item.length < 2) {
+              return null;
+            }
+
+            const title = normalizeTextInput(item[0]);
+            const innerName = normalizeTextInput(item[1]);
+            if (!innerName) {
+              return null;
+            }
+
+            return [title || innerName, innerName, item[2] !== false];
+          })
+          .filter(Boolean);
+
+        return normalizedDetails.length
+          ? normalizedDetails
+          : cloneEngineDetails(defaultEngineDetails);
+      }
+
+      function normalizeEngineList(
+        rawEngineList,
+        defaultEngineList,
+        normalizedEngineDetails
+      ) {
+        const normalizedList = {};
+        const rawList = isPlainObject(rawEngineList) ? rawEngineList : {};
+
+        Object.entries(rawList).forEach(([category, engines]) => {
+          if (!Array.isArray(engines)) {
+            return;
+          }
+
+          normalizedList[category] = engines
+            .map((item) => normalizeEngineItem(item))
+            .filter(Boolean);
+        });
+
+        Object.entries(defaultEngineList).forEach(([category, engines]) => {
+          if (!Array.isArray(engines)) {
+            if (normalizedList[category] === undefined) {
+              normalizedList[category] = deepCloneData(engines);
+            }
+            return;
+          }
+
+          if (!Array.isArray(rawList[category]) || !normalizedList[category].length) {
+            normalizedList[category] = engines.map((item) => cloneEngineItem(item));
+          }
+        });
+
+        normalizedEngineDetails.forEach((detail) => {
+          const category = detail[1];
+          if (!Array.isArray(normalizedList[category])) {
+            normalizedList[category] = Array.isArray(defaultEngineList[category])
+              ? defaultEngineList[category].map((item) => cloneEngineItem(item))
+              : [];
+          }
+        });
+
+        return normalizedList;
+      }
+
+      function normalizeStoredSettings(rawSettings, defaultSettings) {
+        const normalizedSettings = deepCloneData(defaultSettings);
+
+        if (!isPlainObject(rawSettings)) {
+          return normalizedSettings;
+        }
+
+        Object.keys(normalizedSettings).forEach((key) => {
+          if (key === "engineDetails" || key === "engineList") {
+            return;
+          }
+
+          if (rawSettings[key] !== undefined) {
+            normalizedSettings[key] = deepCloneData(rawSettings[key]);
+          }
+        });
+
+        const normalizedEngineDetails = normalizeEngineDetails(
+          rawSettings.engineDetails,
+          defaultSettings.engineDetails
+        );
+
+        normalizedSettings.engineDetails = normalizedEngineDetails;
+        normalizedSettings.engineList = normalizeEngineList(
+          rawSettings.engineList,
+          defaultSettings.engineList,
+          normalizedEngineDetails
+        );
+
+        return normalizedSettings;
+      }
+
+      function addManagedListener(cleanup, target, type, handler, options) {
+        if (!cleanup || !target?.addEventListener || !target?.removeEventListener) {
+          return handler;
+        }
+
+        target.addEventListener(type, handler, options);
+        cleanup.push(() => {
+          target.removeEventListener(type, handler, options);
+        });
+
+        return handler;
+      }
+
+      function removeManagedListeners(cleanup) {
+        if (!Array.isArray(cleanup)) {
+          return;
+        }
+
+        while (cleanup.length) {
+          const dispose = cleanup.pop();
+          dispose?.();
+        }
+      }
+
+      function getBuiltInEngineIdentity(category, engine) {
+        return [category, engine?.name || "", engine?.url || ""].join("::");
+      }
+
+      function buildBuiltInEngineLookup(engineListSource) {
+        const lookup = new Map();
+
+        Object.entries(engineListSource).forEach(([category, engines]) => {
+          if (!Array.isArray(engines)) {
+            return;
+          }
+
+          engines.forEach((engine) => {
+            lookup.set(getBuiltInEngineIdentity(category, engine), engine);
+          });
+        });
+
+        return lookup;
+      }
+
+      const builtInEngineLookup = buildBuiltInEngineLookup(defaultEngineList);
+
+      function findBuiltInEngineDefault(category, engine) {
+        return builtInEngineLookup.get(getBuiltInEngineIdentity(category, engine));
+      }
+
+      function parseEngineSiteURL(olink) {
+        let protocol;
+        let host;
+
+        if (olink.indexOf("://") !== -1) {
+          protocol = olink.split("://")[0] ? olink.split("://")[0] : "https";
+          host = olink.split("://")[1].split("/")[0];
+        } else {
+          protocol = "https";
+          host = olink.split("/")[0];
+        }
+
+        return {
+          protocol,
+          host,
+          siteURL: protocol + "://" + host,
+        };
+      }
+
+      function buildFaviconUrl(olink, getIconSetting, preferGoogle = true) {
+        const { protocol, host, siteURL } = parseEngineSiteURL(olink);
+        let iconURL;
+
+        if (isNaN(getIconSetting)) {
+          iconURL = getIconSetting;
+        } else {
+          switch (parseInt(getIconSetting, 10)) {
+            case 1:
+              iconURL = siteURL + "/favicon.ico";
+              break;
+            case 2:
+              iconURL = "https://www.google.com/s2/favicons?domain=" + siteURL;
+              break;
+            case 3:
+              iconURL =
+                "https://statics.dnspod.cn/proxy_favicon/_/favicon?domain=" + host;
+              break;
+          }
+        }
+
+        if (iconURL) {
+          return iconURL.replace("%s", siteURL);
+        }
+
+        if (preferGoogle) {
+          return "https://www.google.com/s2/favicons?domain=" + host;
+        }
+
+        return protocol + "://" + host + "/favicon.ico";
+      }
+
+      function getAutoFaviconCandidates(olink) {
+        const { protocol, host, siteURL } = parseEngineSiteURL(olink);
+
+        return [
+          protocol + "://" + host + "/favicon.ico",
+          "https://www.google.com/s2/favicons?domain=" + siteURL,
+          "https://www.google.com/s2/favicons?domain=" + host,
+          "https://statics.dnspod.cn/proxy_favicon/_/favicon?domain=" + host,
+        ];
+      }
+
+      function hasCustomEngineIcon(engine, category) {
+        if (engine?.customIcon === true || engine?.customIcon === "true") {
+          return true;
+        }
+
+        if (engine?.customIcon === false || engine?.customIcon === "false") {
+          return false;
+        }
+
+        if (!engine?.favicon) {
+          return false;
+        }
+
+        const defaultEngine = findBuiltInEngineDefault(category, engine);
+        if (!defaultEngine) {
+          return Boolean(engine.favicon);
+        }
+
+        const knownDefaultIcons = new Set([
+          defaultEngine.favicon,
+          ...getAutoFaviconCandidates(engine.url),
+        ]);
+
+        return !knownDefaultIcons.has(engine.favicon);
+      }
+
+      function resolveEngineFavicon(engine, category, currentSettingData) {
+        const defaultEngine = findBuiltInEngineDefault(category, engine);
+        const autoFavicon = buildFaviconUrl(
+          engine.url,
+          currentSettingData.getIcon,
+          true
+        );
+
+        if (hasCustomEngineIcon(engine, category) && engine.favicon) {
+          return engine.favicon;
+        }
+
+        if (defaultEngine) {
+          return autoFavicon || defaultEngine.favicon || engine.favicon || "";
+        }
+
+        return engine.favicon || autoFavicon || "";
+      }
+
+      return {
+        addManagedListener,
+        buildBuiltInEngineLookup,
+        buildFaviconUrl,
+        deepCloneData,
+        findBuiltInEngineDefault,
+        getAutoFaviconCandidates,
+        getBuiltInEngineIdentity,
+        hasCustomEngineIcon,
+        normalizeEngineDetails,
+        normalizeEngineIconInput,
+        normalizeEngineItem,
+        normalizeEngineList,
+        normalizeEngineUrlInput,
+        normalizeStoredSettings,
+        normalizeTextInput,
+        parseEngineSiteURL,
+        removeManagedListeners,
+        resolveEngineFavicon,
+      };
     }
+    // TESTABLE_HELPERS_END
 
-    function getAutoFaviconCandidates(olink) {
-      const { protocol, host, siteURL } = parseEngineSiteURL(olink);
-
-      return [
-        protocol + "://" + host + "/favicon.ico",
-        "https://www.google.com/s2/favicons?domain=" + siteURL,
-        "https://www.google.com/s2/favicons?domain=" + host,
-        "https://statics.dnspod.cn/proxy_favicon/_/favicon?domain=" + host,
-      ];
-    }
-
-    function hasCustomEngineIcon(engine, category) {
-      if (engine?.customIcon === true || engine?.customIcon === "true") {
-        return true;
-      }
-
-      if (engine?.customIcon === false || engine?.customIcon === "false") {
-        return false;
-      }
-
-      if (!engine?.favicon) {
-        return false;
-      }
-
-      const defaultEngine = findBuiltInEngineDefault(category, engine);
-      if (!defaultEngine) {
-        return Boolean(engine.favicon);
-      }
-
-      const knownDefaultIcons = new Set([
-        defaultEngine.favicon,
-        ...getAutoFaviconCandidates(engine.url),
-      ]);
-
-      return !knownDefaultIcons.has(engine.favicon);
-    }
-
-    function resolveEngineFavicon(engine, category, currentSettingData) {
-      const defaultEngine = findBuiltInEngineDefault(category, engine);
-      const autoFavicon = buildFaviconUrl(
-        engine.url,
-        currentSettingData.getIcon,
-        true
-      );
-
-      if (hasCustomEngineIcon(engine, category) && engine.favicon) {
-        return engine.favicon;
-      }
-
-      if (defaultEngine) {
-        return autoFavicon || defaultEngine.favicon || engine.favicon || "";
-      }
-
-      return engine.favicon || autoFavicon || "";
-    }
+    const coreHelpers = createCoreHelperApi(scriptSettingData.engineList);
+    const {
+      addManagedListener,
+      buildFaviconUrl,
+      deepCloneData,
+      findBuiltInEngineDefault,
+      hasCustomEngineIcon,
+      normalizeEngineIconInput,
+      normalizeEngineUrlInput,
+      normalizeStoredSettings,
+      normalizeTextInput,
+      removeManagedListeners,
+      resolveEngineFavicon,
+    } = coreHelpers;
     // --------------------可设置项结束------------------------
     class Settings {
       #storedSettingData = GM_getValue("searchEngineJumpData");
@@ -503,9 +761,10 @@ function listenUrlChange() {
       }
 
       #checkUpdate() {
+        const storedVersion = this.#storedSettingData?.version || "0";
         if (
           this.#isVersionOutdated(
-            this.#storedSettingData.version,
+            storedVersion,
             this.#scriptSettingData.version
           )
         ) {
@@ -515,14 +774,14 @@ function listenUrlChange() {
           // 5.29.9 更新
           if (
             this.settingData.setBtnOpacity === "0.2" &&
-            this.#isVersionOutdated(this.#storedSettingData.version, "5.29.9")
+            this.#isVersionOutdated(storedVersion, "5.29.9")
           ) {
             this.settingData.setBtnOpacity = "0.7";
           }
 
           // 5.30.2 更新
           if (
-            this.#isVersionOutdated(this.#storedSettingData.version, "5.30.2")
+            this.#isVersionOutdated(storedVersion, "5.30.2")
           ) {
             this.deleteOutdatedSearchItems(["https://so.letv.com/s?wd=%s"]);
             this.modifyOutdatedSearchItems(
@@ -533,7 +792,7 @@ function listenUrlChange() {
 
           // 5.30.4 更新
           if (
-            this.#isVersionOutdated(this.#storedSettingData.version, "5.30.4")
+            this.#isVersionOutdated(storedVersion, "5.30.4")
           ) {
             this.modifyOutdatedSearchItems(
               "https://www.startpage.com/do/asearch$post$query",
@@ -543,7 +802,7 @@ function listenUrlChange() {
 
           // 5.31.1 更新
           if (
-            this.#isVersionOutdated(this.#storedSettingData.version, "5.31.1")
+            this.#isVersionOutdated(storedVersion, "5.31.1")
           ) {
             this.modifyOutdatedSearchItemsTarget("https://zh.moegirl.org/%s");
             this.modifyOutdatedSearchItemsTarget(
@@ -556,7 +815,7 @@ function listenUrlChange() {
 
           // 5.31.8 更新
           if (
-            this.#isVersionOutdated(this.#storedSettingData.version, "5.31.8")
+            this.#isVersionOutdated(storedVersion, "5.31.8")
           ) {
             this.modifyOutdatedSearchItems(
               "https://cn.bing.com/search?q=%s",
@@ -566,7 +825,7 @@ function listenUrlChange() {
 
           // 5.31.11 更新
           if (
-            this.#isVersionOutdated(this.#storedSettingData.version, "5.31.11")
+            this.#isVersionOutdated(storedVersion, "5.31.11")
           ) {
             this.addSearchItem(
               {
@@ -581,7 +840,7 @@ function listenUrlChange() {
 
           // 5.31.16 更新 twitter 更新为X
           if (
-            this.#isVersionOutdated(this.#storedSettingData.version, "5.31.16")
+            this.#isVersionOutdated(storedVersion, "5.31.16")
           ) {
             this.deleteOutdatedSearchItems([
               "https://twitter.com/search/%s",
@@ -599,7 +858,7 @@ function listenUrlChange() {
 
           // 5.31.17 更新贴吧图标
           if (
-            this.#isVersionOutdated(this.#storedSettingData.version, "5.31.17")
+            this.#isVersionOutdated(storedVersion, "5.31.17")
           ) {
             this.modifyOutdatedSearchItemsIcon(
               "https://tieba.baidu.com/f?kw=%s&ie=utf-8",
@@ -611,6 +870,8 @@ function listenUrlChange() {
           console.info(
             `\n%c ${GM_info.script.name} 设置已更新 \n%c 本地设置版本号:\t\t${
               this.#storedSettingData.version
+                ? this.#storedSettingData.version
+                : storedVersion
             }\t\t\t\t\t\t\t\n%c 当前版本号:\t\t\t${
               this.settingData.version
             }\t\t\t\t\t\t\t\n`,
@@ -702,11 +963,16 @@ function listenUrlChange() {
         let settingsChanged = false;
 
         if (this.#storedSettingData) {
-          this.settingData = Object.assign({}, this.#storedSettingData);
-          this.#checkSettingDataIntegrity();
+          this.settingData = normalizeStoredSettings(
+            this.#storedSettingData,
+            this.#scriptSettingData
+          );
+          settingsChanged =
+            JSON.stringify(this.settingData) !==
+              JSON.stringify(this.#storedSettingData) || settingsChanged;
           this.#checkUpdate();
         } else {
-          this.settingData = this.#scriptSettingData;
+          this.settingData = deepCloneData(this.#scriptSettingData);
           GM_setValue("searchEngineJumpData", this.settingData);
         }
 
@@ -941,16 +1207,24 @@ function listenUrlChange() {
     }
 
     class SettingButton {
+      static menuCommandRegistered = false;
       settingButtonElement;
 
       constructor(jumpBarContainer, settingData) {
         this.parentJumpBarContainer = jumpBarContainer;
         this.settingData = settingData;
         this.#addButtonToJumpBar();
-        this.settingButtonElement?.addEventListener("click", () =>
-          this.#activateSettingButton()
+        this.boundActivateSettingPanel = () => this.#activateSettingButton();
+        activateSettingPanel = this.boundActivateSettingPanel;
+        this.settingButtonElement?.addEventListener(
+          "click",
+          this.boundActivateSettingPanel
         );
-        GM_registerMenuCommand("设置菜单", () => this.#activateSettingButton());
+
+        if (!SettingButton.menuCommandRegistered) {
+          GM_registerMenuCommand("设置菜单", () => activateSettingPanel());
+          SettingButton.menuCommandRegistered = true;
+        }
       }
       #addButtonToJumpBar() {
         if (this.settingData.setBtnOpacity >= 0) {
@@ -970,11 +1244,21 @@ function listenUrlChange() {
         }
         this.settingPanel.show();
       }
+      destroy() {
+        this.settingPanel?.destroy?.();
+        this.settingButtonElement?.removeEventListener(
+          "click",
+          this.boundActivateSettingPanel
+        );
+        this.settingButtonElement?.remove();
+
+        if (activateSettingPanel === this.boundActivateSettingPanel) {
+          activateSettingPanel = function () {};
+        }
+      }
     }
 
     class JumpBar {
-      engineButtonTemplate =
-        '<a class="sej-engine" target="$blank$" data-iqxincategory="$category$" encoding="$encoding$" gbk="$gbk$" url="$url$"><img class="sej-engine-icon" src="$favicon$" alt="">$name$</a>';
       dropDownLists = [];
       container;
       inputTarget;
@@ -984,6 +1268,7 @@ function listenUrlChange() {
       engineList;
       settingData;
       inlineStyleBlocked;
+      listenerCleanup = [];
 
       constructor(engineList, settingData, matchedRule) {
         this.engineList = engineList;
@@ -1003,31 +1288,35 @@ function listenUrlChange() {
             this.container.getBoundingClientRect().top + window.scrollY;
           // 判断是否需要只在向上滚动时显示
           if (this.settingData.fixedTopUpward) {
-            window.onwheel = document.onwheel = (e) => {
-              e.wheelDelta > 0
-                ? this.#fixedToTop(
-                    this.matchedRule.fixedTop,
-                    this.matchedRule.fixedTopColor,
-                    originalContainerDistanceTop
-                  )
-                : {};
-            };
-          } else {
-            window.onscroll = () => {
+            addManagedListener(this.listenerCleanup, window, "wheel", (e) => {
+              const isScrollingUp =
+                "deltaY" in e ? e.deltaY < 0 : e.wheelDelta > 0;
+              if (!isScrollingUp) {
+                return;
+              }
+
               this.#fixedToTop(
                 this.matchedRule.fixedTop,
                 this.matchedRule.fixedTopColor,
                 originalContainerDistanceTop
               );
-            };
+            });
+          } else {
+            addManagedListener(this.listenerCleanup, window, "scroll", () => {
+              this.#fixedToTop(
+                this.matchedRule.fixedTop,
+                this.matchedRule.fixedTopColor,
+                originalContainerDistanceTop
+              );
+            });
           }
         }
-        // 在 Shadow root 中查询并绑定事件
         const shadowRoot = ShadowDOMManager.getRoot();
-        shadowRoot.querySelectorAll("sejspan a.sej-engine").forEach((engine) => {
-          engine.addEventListener("mousedown", (e) => {
-            this.#jumpToSelectedEngine(e);
-          });
+        addManagedListener(this.listenerCleanup, shadowRoot, "mousedown", (e) => {
+          if (!e.target?.closest?.(".sej-engine")) {
+            return;
+          }
+          this.#jumpToSelectedEngine(e);
         });
       }
       #initContainer() {
@@ -1053,8 +1342,11 @@ function listenUrlChange() {
           this.#createContainerDOM();
           this.container.classList.add("selectSearch");
           // selectionchange 事件在主文档上监听，但操作 Shadow DOM 中的元素
-          document.addEventListener("selectionchange", () =>
-            this.#toggleSelectSearchJumpBar()
+          addManagedListener(
+            this.listenerCleanup,
+            document,
+            "selectionchange",
+            () => this.#toggleSelectSearchJumpBar()
           );
         } else {
           console.info("未启用搜索跳转，跳过初始化");
@@ -1127,13 +1419,47 @@ function listenUrlChange() {
       #getInsertPositionLabel() {
         return this.matchedRule?.insertIntoDoc.where.toLowerCase();
       }
+      #createEngineButton(engine, category) {
+        const engineButton = document.createElement("a");
+        engineButton.className = "sej-engine";
+        engineButton.dataset.iqxincategory = category;
+        engineButton.setAttribute(
+          "encoding",
+          (engine.encoding || "utf-8").toLowerCase()
+        );
+        engineButton.setAttribute("url", engine.url);
+
+        if (engine.gbk) {
+          engineButton.setAttribute("gbk", engine.gbk);
+        }
+        if (settingData.newtab || engine.blank) {
+          engineButton.setAttribute("target", "_blank");
+        }
+
+        const resolvedFavicon = resolveEngineFavicon(
+          engine,
+          category,
+          this.settingData
+        );
+        if (resolvedFavicon) {
+          const iconImage = document.createElement("img");
+          iconImage.className = "sej-engine-icon";
+          iconImage.alt = "";
+          iconImage.src = resolvedFavicon;
+          engineButton.appendChild(iconImage);
+        }
+
+        engineButton.appendChild(document.createTextNode(engine.name));
+
+        return engineButton;
+      }
       #initEngines() {
         const self = this;
         this.engineList.engineCategories.forEach(function (item) {
           // console.log(item);  // 搜索菜单   ["网页", "web", true]
           const category = item[1]; // "web"
           const cName = item[0]; // "网页"
-          let engines = [];
+          const engines = [];
 
           self.engineList[category].forEach(function (engine) {
             const engineUrl = engine.url;
@@ -1144,56 +1470,20 @@ function listenUrlChange() {
             )
               return; // 去掉跳转到当前引擎的引擎
 
-            let engineListButton = self.engineButtonTemplate
-              .replace("$encoding$", (engine.encoding || "utf-8").toLowerCase())
-              .replace("$url$", engineUrl)
-              .replace("$name$", engine.name)
-              .replace("$category$", category);
-
-            const resolvedFavicon = resolveEngineFavicon(
-              engine,
-              category,
-              self.settingData
-            );
-
-            // 图标
-            if (resolvedFavicon) {
-              engineListButton = engineListButton.replace(
-                "$favicon$",
-                resolvedFavicon
-              );
-            } else {
-              engineListButton = engineListButton.replace(
-                'src="$favicon$"',
-                ""
-              );
-            }
-            // gbk编码
-            if (engine.gbk) {
-              engineListButton = engineListButton.replace("$gbk$", engine.gbk);
-            } else {
-              engineListButton = engineListButton.replace('gbk="$gbk$"', "");
-            }
-            // 新标签页
-            if (settingData.newtab || engine.blank) {
-              engineListButton = engineListButton.replace("$blank$", "_blank");
-            } else {
-              engineListButton = engineListButton.replace(
-                'target="$blank$"',
-                ""
-              );
-            }
-
-            engines.push(engineListButton);
+            engines.push(self.#createEngineButton(engine, category));
           });
           // 非空列表
           if (!engines.length) return;
 
-          engines = engines.join("");
-
           // CSP 严格页面：禁用下拉菜单（需要大量 inline style），改为平铺分类
           if (self.inlineStyleBlocked) {
-            self.container.innerHTML += `<span class="sej-category-title">${cName}</span>${engines}`;
+            const categoryTitle = document.createElement("span");
+            categoryTitle.className = "sej-category-title";
+            categoryTitle.textContent = cName;
+            self.container.appendChild(categoryTitle);
+            engines.forEach((engineButton) => {
+              self.container.appendChild(engineButton);
+            });
             return;
           }
 
@@ -1202,11 +1492,15 @@ function listenUrlChange() {
             !self.settingData.foldlist &&
             category == self.matchedRule?.engineList
           ) {
-            self.container.innerHTML = engines;
+            engines.forEach((engineButton) => {
+              self.container.appendChild(engineButton);
+            });
           } else {
             const dropDownList = document.createElement("sejspan");
             dropDownList.className = "sej-drop-list rwl-exempt";
-            dropDownList.innerHTML = engines;
+            engines.forEach((engineButton) => {
+              dropDownList.appendChild(engineButton);
+            });
 
             //  a:主搜索菜单
             // dropList: 搜索子菜单
@@ -1501,11 +1795,18 @@ function listenUrlChange() {
         postForm.method = "post";
         postForm.action = url;
         postForm.style.cssText = "display:none;";
-        postForm.innerHTML = `<input type="hidden" name="${value[0]}" value="${value[1]}"/>`;
+        const hiddenInput = document.createElement("input");
+        hiddenInput.type = "hidden";
+        hiddenInput.name = value[0];
+        hiddenInput.value = value[1];
+        postForm.appendChild(hiddenInput);
         if (targetName) {
           postForm.target = targetName;
         }
         return postForm;
+      }
+      destroy() {
+        removeManagedListeners(this.listenerCleanup);
       }
     }
 
@@ -1518,6 +1819,8 @@ function listenUrlChange() {
       editTemp = null;
       online = null;
       shadowRoot = null; // 存储 Shadow root 引用
+      listenerCleanup = [];
+      dragDocumentCleanup = [];
 
       constructor() {
         this.shadowRoot = ShadowDOMManager.getRoot();
@@ -1534,10 +1837,10 @@ function listenUrlChange() {
 
         this.addContent();
 
-        this.mask.addEventListener("click", function () {
+        addManagedListener(this.listenerCleanup, this.mask, "click", function () {
           that.hide();
         });
-        this.ele.addEventListener("click", function (e) {
+        addManagedListener(this.listenerCleanup, this.ele, "click", function (e) {
           e.stopPropagation();
         });
 
@@ -1545,33 +1848,38 @@ function listenUrlChange() {
         ShadowDOMManager.getRoot().appendChild(this.mask);
 
         // 绑定事件
-        this.ele.addEventListener("click", that.domClick.bind(this), false);
+        this.boundDomClick = that.domClick.bind(this);
+        addManagedListener(this.listenerCleanup, this.ele, "click", this.boundDomClick);
         this.dragEvent();
         this.setDragNode(this.ele); //设置拖动
         // input[range]
         that.rangeChange(true);
-        this.shadowRoot
-          .querySelector("#setBtnOpacityRange")
-          .addEventListener("input", that.rangeChange.bind(that));
+        this.boundRangeChange = that.rangeChange.bind(that);
+        addManagedListener(
+          this.listenerCleanup,
+          this.$("#setBtnOpacityRange"),
+          "input",
+          this.boundRangeChange
+        );
 
-        this.shadowRoot
-          .querySelector("#xin-save")
-          .addEventListener("click", function () {
-            that.saveData();
-            that.hide();
-            that.reloadSet();
-          });
-        this.shadowRoot
-          .querySelector("#xin-addDel")
-          .addEventListener("click", function (e) {
-            that.addDel(e);
-          });
-        this.shadowRoot
-          .querySelector("#xin-modification")
-          .addEventListener("click", function () {
+        addManagedListener(this.listenerCleanup, this.$("#xin-save"), "click", function () {
+          that.saveData();
+          that.hide();
+          that.reloadSet();
+        });
+        addManagedListener(this.listenerCleanup, this.$("#xin-addDel"), "click", function (e) {
+          that.addDel(e);
+        });
+        addManagedListener(
+          this.listenerCleanup,
+          this.$("#xin-modification"),
+          "click",
+          function () {
             that.editCodeBox();
-          });
-        window.addEventListener("resize", this.windowResize.bind(this));
+          }
+        );
+        this.boundWindowResize = this.windowResize.bind(this);
+        addManagedListener(this.listenerCleanup, window, "resize", this.boundWindowResize);
       }
       // 添加辅助方法用于在 Shadow root 中查询元素
       $(selector) {
@@ -1584,6 +1892,10 @@ function listenUrlChange() {
         var that = this;
         var odivsdrag = this.$$(".drag");
         [].forEach.call(odivsdrag, function (odiv) {
+          if (odiv.dataset.iqxinDragBound === "true") {
+            return;
+          }
+          odiv.dataset.iqxinDragBound = "true";
           odiv.addEventListener("dragstart", that.domdragstart, false);
           odiv.addEventListener("dragenter", that.domdragenter, false);
           odiv.addEventListener("dragover", that.domdragover, false);
@@ -1592,22 +1904,89 @@ function listenUrlChange() {
           odiv.addEventListener("dragend", that.domdropend, false);
         });
       }
+      createActionIcon(className, title, iconSource) {
+        const action = document.createElement("span");
+        action.className = className;
+        action.title = title;
+
+        const image = document.createElement("img");
+        image.className = "sej-engine-icon";
+        image.src = iconSource;
+        image.alt = "";
+        action.appendChild(image);
+
+        return action;
+      }
+      createEngineRow(engine, category, index, currentSettingData) {
+        const dragWrapper = document.createElement("span");
+        dragWrapper.className = "drag";
+        dragWrapper.draggable = true;
+
+        const engineElement = document.createElement("span");
+        engineElement.className = "sej-engine";
+        engineElement.dataset.xin = index;
+        engineElement.dataset.iqxinimg = engine.favicon || "";
+        engineElement.dataset.iqxintitle = engine.name;
+        engineElement.dataset.iqxinlink = engine.url;
+
+        if (hasCustomEngineIcon(engine, category)) {
+          engineElement.dataset.iqxincustomicon = "true";
+        }
+        if (engine.blank) {
+          engineElement.dataset.iqxintarget = "_blank";
+        }
+        if (engine.disable) {
+          engineElement.dataset.iqxindisabled = "true";
+        }
+        if (engine.gbk) {
+          engineElement.dataset.iqxingbk = "true";
+        }
+
+        const iconImage = document.createElement("img");
+        iconImage.className = "sej-engine-icon";
+        iconImage.alt = "";
+        iconImage.src = resolveEngineFavicon(engine, category, currentSettingData);
+        engineElement.appendChild(iconImage);
+
+        const label = document.createElement("span");
+        label.className = "sej-engine-label";
+        label.textContent = engine.name;
+        engineElement.appendChild(label);
+
+        dragWrapper.appendChild(engineElement);
+        dragWrapper.appendChild(
+          this.createActionIcon("iqxin-set-edit", "编辑 Edit", icon.edit)
+        );
+        dragWrapper.appendChild(document.createTextNode(" "));
+        dragWrapper.appendChild(
+          this.createActionIcon("iqxin-set-del", "删除 Delete", icon.del)
+        );
+
+        return dragWrapper;
+      }
+      createCategoryTitle(detailsItem, orderIndex) {
+        const titleElement = document.createElement("div");
+        titleElement.classList.add("sejtitle", "drag");
+        titleElement.setAttribute("draggable", "true");
+        titleElement.dataset.iqxintitle = detailsItem[1];
+        titleElement.dataset.xin = orderIndex;
+
+        const label = document.createElement("span");
+        label.className = "iqxin-pointer-events iqxin-title-label";
+        label.textContent = detailsItem[0];
+        titleElement.appendChild(label);
+
+        titleElement.appendChild(
+          this.createActionIcon("iqxin-title-edit", "编辑 Edit", icon.edit)
+        );
+        titleElement.appendChild(document.createTextNode(" "));
+        titleElement.appendChild(
+          this.createActionIcon("iqxin-set-title-del", "删除 Delete", icon.del)
+        );
+
+        return titleElement;
+      }
       addContent() {
-        var aPattern =
-          '<span draggable="true" class="drag">' +
-          '<span class="sej-engine"' +
-          ' data-xin="$xin$" ' +
-          ' data-iqxinimg="$img$" ' +
-          "$customIconAttr$" +
-          ' data-iqxintitle="$title$" ' +
-          ' data-iqxinlink="$link$" ' +
-          ' data-iqxintarget="$blank$" ' +
-          ' data-iqxindisabled="$disabled$" ' +
-          ' data-iqxingbk="$gbk$" ' +
-          '><img class="sej-engine-icon" src="$favicon$" alt=""><span>$name$</span></span>' +
-          ' <span class="iqxin-set-edit" title="编辑 Edit"><img class="sej-engine-icon" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAQAAADZc7J/AAACDklEQVR4nJXVzUtUURjH8Y/mSNKkki2iwiApxHQ1q/6C+gusoCB6oxbRRqFNL4sWtRKqhVSLIDe1CqpNiwjKIilKLKKFEr2Z2qI0xxHN0+LOm+PMOPOc1T2H7/f5ncO991BdNer30zmxKrl0xV2zKJjRoy6aqkkvbbdVLPuUq+8+5uGXnVILki7qsxgtNDtrTNLcijHvrdYsft0/wQ8DZgSzeqMUDW4IJceYHcvwCd1ies0KZvWI1TnhIH6574Olgg0E74zmhZ902j304by4Cxp5LPjtQNmjy3XPVK2rgmCBCcGgdVXhdBgUBCMEwVMNVeIvBMFLifKC8vgrndFBlRJUhJcWFMd3ZfGuzFRxwWrdu3KTxQQVhi8lqApfKVhf0d4bc2/OckG9Pkur7r3TEw+1FRO0GxdM2Vc2/HHBgr1If935UTfigbt5+C27MeSo9+m5GJYitlCwWR2G8oQZ/FgWX1aFgnZMG852v5nFR4rhMn+2dDVJYFpKqy0SDksUhF9FsE0bWgyIa9bIanihoEUcDTrSz4ueOVMOLxQkzVkrZcaoNz755rmpcnihYNghm3w26Ys/5cGcIKgRBJDyqCIquj8C1PqKZvHK+qVrJ5bMRwmGterU64pkkZupWO3RjXkzUZj9+jVZMGK6IsEaHTbgjpOSUYZL/pa5m4qPIbtyznpHvJaqGB53O33h4T/3VzLuzDhE6AAAAABJRU5ErkJggg=="/></span>' +
-          ' <span class="iqxin-set-del" title="删除 Delete"><img class="sej-engine-icon" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAMAAABEpIrGAAADAFBMVEUAAADsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVHsbVH///9VVVVWVlZXV1dYWFhZWVlaWlpbW1tcXFxdXV1eXl5fX19gYGBhYWFiYmJjY2NkZGRlZWVmZmZnZ2doaGhpaWlqampra2tsbGxtbW1ubm5vb29wcHBxcXFycnJzc3N0dHR1dXV2dnZ3d3d4eHh5eXl6enp7e3t8fHx9fX1+fn5/f3+AgICBgYGCgoKDg4OEhISFhYWGhoaHh4eIiIiJiYmKioqLi4uMjIyNjY2Ojo6Pj4+QkJCRkZGSkpKTk5OUlJSVlZWWlpaXl5eYmJiZmZmampqbm5ucnJydnZ2enp6fn5+goKChoaGioqKjo6OkpKSlpaWmpqanp6eoqKipqamqqqqrq6usrKytra2urq6vr6+wsLCxsbGysrKzs7O0tLS1tbW2tra3t7e4uLi5ubm6urq7u7u8vLy9vb2+vr6/v7/AwMDBwcHCwsLDw8PExMTFxcXGxsbHx8fIyMjJycnKysrLy8vMzMzNzc3Ozs7Pz8/Q0NDR0dHS0tLT09PU1NTV1dXW1tbX19fY2NjZ2dna2trb29vc3Nzd3d3e3t7f39/g4ODh4eHi4uLj4+Pk5OTl5eXm5ubn5+fo6Ojp6enq6urr6+vs7Ozt7e3u7u7v7+/w8PDx8fHy8vLz8/P09PT19fX29vb39/f4+Pj5+fn6+vr7+/v8/Pz9/f3+/v7///8dej9TAAAAU3RSTlMAAABm7P/sZgAAABPO////zhQAAB/i/////////+IfAAAe4fvk4AAAAAAd/+Q3GxwAFR85FQBjz+LPY+v////r6//////rZM/h4c9jABUdHRUAAP0EcPoAAAEuSURBVHic7ZRnc8IwDIbdEUZHGB0kDsMOMcOMttBBB93Qvcj//y9VjB0Czh13/dz3ixT5OVmSYyMktLK6tm74oYxEMpVGUW1sbm2bM8DMZHP5OWBnd2+/YNnYAWHbKhRL5cocQKjrWFWPuSDmVS3HpUQu1eoNQkiTM9xqd7oHoG6n3cKMNyHcqNfQ4VGPUsr7nh0FbK/PIdw7PkGnZwOZNrqF9AfnF+jyaigLixYp/eH1Dbq9u4eAHyOAHh5HaPz0DCnjANjm5fUNvX98QoGCxyo5Fjmh0K/vH2hzAi0KnqnymMgJrU6gzemQBM+DZpX1/XBYUyAYTTAuZTUg+Aw8Zf+BvwJLR730sPTjXgD0H2YB0BUClXKpGAeE1y+fy2ZMfX12gdOpZMLQAfkE/AL7e5vGZF+dOQAAAABJRU5ErkJggg=="></span>' +
-          "</span>";
         var details = engineList.engineCategories;
         // 若根据数组长度获取,负数引导的为属性,不再length长度之内,所以来个大体的数字,当都为空时,结束循环
         // var detailsLength = details.length;
@@ -1623,26 +2002,11 @@ function listenUrlChange() {
           odiv.id = details[j][1]; // "web"
           odiv.classList.add("iqxin-items");
 
-          var oDivTitle = document.createElement("div");
-          oDivTitle.classList.add("sejtitle", "drag");
-          oDivTitle.setAttribute("draggable", "true");
-          oDivTitle.dataset.iqxintitle = details[j][1];
-          oDivTitle.dataset.xin = j;
-          oDivTitle.innerHTML =
-            '<span class="iqxin-pointer-events">' +
-            details[j][0] +
-            "</span>" +
-            '<span class="iqxin-title-edit" title="编辑 Edit"><img class="sej-engine-icon" src="' +
-            icon.edit +
-            '"/></span>' +
-            ' <span class="iqxin-set-title-del" title="删除 Delete"><img class="sej-engine-icon" src="' +
-            icon.del +
-            '"></span>';
+          var oDivTitle = this.createCategoryTitle(details[j], j);
           odiv.appendChild(oDivTitle);
 
           var oDivCon = document.createElement("div");
           oDivCon.classList.add("sejcon");
-          var oDivConStr = "";
           var engineListItem = engineList[details[j][1]];
           var itemLength = engineListItem.length;
           for (let ii = 0; ii < itemLength; ii++) {
@@ -1650,50 +2014,20 @@ function listenUrlChange() {
             if (!engineListItem[jj]) {
               break;
             }
-            const resolvedFavicon = resolveEngineFavicon(
-              engineListItem[jj],
-              details[j][1],
-              settingData
-            );
-            const customIcon = hasCustomEngineIcon(
-              engineListItem[jj],
-              details[j][1]
-            );
-            var a = aPattern
-              .replace("$name$", engineListItem[jj].name)
-              .replace("$favicon$", resolvedFavicon)
-              .replace("$xin$", jj);
-            // 添加属性
-            a = a
-              .replace("$img$", engineListItem[jj].favicon || "")
-              .replace(
-                "$customIconAttr$",
-                customIcon ? ' data-iqxincustomicon="true" ' : ""
+            oDivCon.appendChild(
+              this.createEngineRow(
+                engineListItem[jj],
+                details[j][1],
+                jj,
+                settingData
               )
-              .replace("$title$", engineListItem[jj].name)
-              .replace("$link$", engineListItem[jj].url);
-            if (engineListItem[jj].blank) {
-              a = a.replace("$blank$", "_blank");
-            } else {
-              a = a.replace('data-iqxintarget="$blank$"', "");
-            }
-            if (engineListItem[jj].disable) {
-              a = a.replace("$disabled$", "true");
-            } else {
-              a = a.replace('data-iqxindisabled="$disabled$"', "");
-            }
-            if (engineListItem[jj].gbk) {
-              a = a.replace("$gbk$", "true");
-            } else {
-              a = a.replace('data-iqxingbk="$gbk$"', "");
-            }
-
-            oDivConStr += a;
+            );
           }
 
-          oDivConStr += "<span class='iqxin-additem'>+</span>";
-
-          oDivCon.innerHTML = oDivConStr;
+          const addItem = document.createElement("span");
+          addItem.className = "iqxin-additem";
+          addItem.textContent = "+";
+          oDivCon.appendChild(addItem);
           odiv.appendChild(oDivCon);
 
           this.ele.appendChild(odiv);
@@ -1702,103 +2036,78 @@ function listenUrlChange() {
         // 更多设置 菜单
         var btnEle2 = document.createElement("div");
         btnEle2.id = "btnEle2";
-        var fixedTop_checked = settingData.fixedTop ? "checked" : "";
-        var fixedTopUpward_checked = settingData.fixedTopUpward
-          ? "checked"
-          : "";
-        var transition_checked = settingData.transtion ? "checked" : "";
-        var selectSearch_checked = settingData.selectSearch ? "checked" : "";
-        var foldlist_checked = settingData.foldlist ? "checked" : "";
-        var allOpen_checked = settingData.allOpen ? "checked" : "";
-        var HideTheSameLink_checked = settingData.HideTheSameLink
-          ? "checked"
-          : "";
-
-        var btnStr2 =
+        btnEle2.innerHTML =
           "<div>" +
           "<span id='xin-reset' title='慎点,出厂重置'>清空设置</span>" +
           "<span id='xin-modification' title='edit 分享自己的配置或清空配置'>配置文件</span>" +
-          // "<span id='xin-importing' title='importing 导入更为专业的搜索引擎'>导入</span>" +
           "<span id='xin-selectSearch' title='划词搜索, 只有非搜索页面才会生效, 开关功能需要刷新页面'>" +
-          "<label>划词搜索<input id='iqxin-selectSearch' type='checkbox' name='' " +
-          selectSearch_checked +
-          "'></label>" +
+          "<label>划词搜索<input id='iqxin-selectSearch' type='checkbox' name=''></label>" +
           "</span>" +
           "<span id='xin-transtion' title='动画,该设置需要刷新页面生效'>" +
-          "<label>动画<input id='iqxin-transtion' type='checkbox' name='' " +
-          transition_checked +
-          "'></label>" +
+          "<label>动画<input id='iqxin-transtion' type='checkbox' name=''></label>" +
           "</span>" +
           "<span id='xin-foldlists' title='将当前所在搜索分类折叠'>" +
-          "<label>折叠当前搜索分类<input id='iqxin-foldlist' type='checkbox' name='' " +
-          foldlist_checked +
-          "'></label>" +
+          "<label>折叠当前搜索分类<input id='iqxin-foldlist' type='checkbox' name=''></label>" +
           "</span>" +
           "<span id='iqxin-fixedTopS' title='fixedTop 当滚动页面时,固定到页面顶端。某些页面的样式存在问题'>" +
-          "<label>固定到顶端<input id='iqxin-fixedTop' type='checkbox' name='' " +
-          fixedTop_checked +
-          "'></label>" +
+          "<label>固定到顶端<input id='iqxin-fixedTop' type='checkbox' name=''></label>" +
           "</span>" +
           "<span id='iqxin-fixedTopUpward' title='固定到顶端后,仅向上滚动才显示,需要刷新网页生效'>" +
-          "<label>仅上拉显示<input id='iqxin-fixedTopUpward-item' type='checkbox' name='' " +
-          fixedTopUpward_checked +
-          "'></label>" +
+          "<label>仅上拉显示<input id='iqxin-fixedTopUpward-item' type='checkbox' name=''></label>" +
           "</span>" +
           "<span id='xin-HideTheSameLink' title='隐藏同站链接,如果想在同一个搜索网站,但是想通过不同语言来搜索, 可以取消该选项'>" +
-          "<label>隐藏同站链接<input id='iqxin-HideTheSameLink' type='checkbox' name='' " +
-          HideTheSameLink_checked +
-          "'></label>" +
+          "<label>隐藏同站链接<input id='iqxin-HideTheSameLink' type='checkbox' name=''></label>" +
           "</span>" +
-          "<span id='xin-setBtnOpacity' title='设置按钮透明度,需要刷新页面'>设置按钮透明度 <input type='range' step='0.05'  min='0' max='1' value='" +
-          (settingData.setBtnOpacity < 0
-            ? -settingData.setBtnOpacity
-            : settingData.setBtnOpacity) +
-          "' id='setBtnOpacityRange'><i class='iqxin-setBtnOpacityRangeValue' title='按钮 显示/隐藏(非透明)),请确定知道自己如何再次打开; 火狐非高级玩家建议别禁用'></i></span>" +
+          "<span id='xin-setBtnOpacity' title='设置按钮透明度,需要刷新页面'>设置按钮透明度 <input type='range' step='0.05'  min='0' max='1' id='setBtnOpacityRange'><i class='iqxin-setBtnOpacityRangeValue' title='按钮 显示/隐藏(非透明)),请确定知道自己如何再次打开; 火狐非高级玩家建议别禁用'></i></span>" +
           "</div>";
-        // "<div><span>test</span></div>";
-        btnEle2.innerHTML = btnStr2;
         this.ele.appendChild(btnEle2);
+        this.$("#iqxin-selectSearch").checked = Boolean(settingData.selectSearch);
+        this.$("#iqxin-transtion").checked = Boolean(settingData.transtion);
+        this.$("#iqxin-foldlist").checked = Boolean(settingData.foldlist);
+        this.$("#iqxin-fixedTop").checked = Boolean(settingData.fixedTop);
+        this.$("#iqxin-fixedTopUpward-item").checked = Boolean(
+          settingData.fixedTopUpward
+        );
+        this.$("#iqxin-HideTheSameLink").checked = Boolean(
+          settingData.HideTheSameLink
+        );
+        this.$("#setBtnOpacityRange").value =
+          settingData.setBtnOpacity < 0
+            ? -settingData.setBtnOpacity
+            : settingData.setBtnOpacity;
 
         // 添加按钮
         var btnEle = document.createElement("div");
         btnEle.id = "btnEle";
 
-        var btnStr =
+        btnEle.innerHTML =
           "<div class='btnEleLayer'>" +
           "<span class='feedback' title='在 GreasyFork 进行反馈'><a target='_blank' href='https://greasyfork.org/en/scripts/454280-searchenginejumpplus'>Greasy Fork</a></span>" +
           "<span class='feedback' title='在 Github 进行反馈'><a target='_blank' href='https://github.com/MUTED64/SearchEngineJumpPlus'>GitHub</a></span>" +
           "<span id='xin-allOpen' title='后台打开该搜索分类的所有网站'>" +
-          "<label>一键搜索<input id='iqxin-allOpen-item' type='checkbox' name='' " +
-          allOpen_checked +
-          "'></label>" +
+          "<label>一键搜索<input id='iqxin-allOpen-item' type='checkbox' name=''></label>" +
           "</span>" +
           "<span id='xin-centerDisplay' title='center 居中显示。主要是兼容AC-baidu:重定向优化百度搜狗谷歌搜索_去广告_favicon_双列'>居中：" +
           "<select id='iqxin-center'>" +
-          "<option value='original'" +
-          (settingData.center == 0 ? "selected" : "") +
-          ">默认</option>" +
-          "<option value='force'" +
-          (settingData.center == 1 ? "selected" : "") +
-          ">强制</option>" +
-          "<option value='auto'" +
-          (settingData.center == 2 ? "selected" : "") +
-          ">自动</option>" +
+          "<option value='original'>默认</option>" +
+          "<option value='force'>强制</option>" +
+          "<option value='auto'>自动</option>" +
           "</select>" +
           "</span> " +
           "<span id='xin-newtab' title='open newtab 是否采用新标签页打开的方式'>打开方式：" +
           "<select id='iqxin-globalNewtab'>" +
           "<option value='globalDef'>默认页面</option>" +
-          "<option value='globalNewtab'" +
-          (settingData.newtab ? "selected" : "") +
-          ">新标签页</option>" +
+          "<option value='globalNewtab'>新标签页</option>" +
           "</select>" +
           "</span> " +
           "<span id='xin-addDel' title='add & del 增加新的或者删除现有的搜索'>增加 / 删除</span> " +
           "<span id='moreSet' title='more set'>更多设置</span>" +
           "<span id='xin-save' title='save & close'>保存并关闭</span>" +
           "</div>";
-        btnEle.innerHTML = btnStr;
         this.ele.appendChild(btnEle);
+        this.$("#iqxin-allOpen-item").checked = Boolean(settingData.allOpen);
+        this.$("#iqxin-center").selectedIndex = Number(settingData.center) || 0;
+        this.$("#iqxin-globalNewtab").selectedIndex = settingData.newtab ? 1 : 0;
 
         // 可以拖动的顶栏
         var dragDom = document.createElement("div");
@@ -1889,20 +2198,20 @@ function listenUrlChange() {
       }
       // 关闭 “添加删除框”
       addDelremove(bool) {
-        var obtn = document.querySelector(".iqxin-btn-active");
-        if (obtn) {
-          obtn.classList.remove("iqxin-btn-active");
+        var obtns = this.$$(".iqxin-btn-active");
+        [].forEach.call(obtns, function (button) {
+          button.classList.remove("iqxin-btn-active");
+        });
 
-          var odom = document.querySelectorAll(".iqxin-set-active");
-          [].forEach.call(odom, function (div) {
-            div.classList.remove("iqxin-set-active");
-          });
+        var odom = this.$$(".iqxin-set-active");
+        [].forEach.call(odom, function (div) {
+          div.classList.remove("iqxin-set-active");
+        });
 
-          var oitemAdd = document.querySelectorAll(".iqxin-additem");
-          [].forEach.call(oitemAdd, function (div) {
-            div.classList.remove("iqxin-set-active");
-          });
-        }
+        var oitemAdd = this.$$(".iqxin-additem");
+        [].forEach.call(oitemAdd, function (div) {
+          div.classList.remove("iqxin-set-active");
+        });
         this.addItemBoxRemove();
       }
 
@@ -1939,60 +2248,45 @@ function listenUrlChange() {
       addItemEnger() {
         var otitle, olink, oimg, oblank;
         var isCustomIcon;
-        otitle = this.$("#iqxin-newTitle").value;
-        olink = this.$("#iqxin-newLink").value;
-        oimg = this.$("#iqxin-newIcon").value;
+        otitle = normalizeTextInput(this.$("#iqxin-newTitle").value);
+        olink = normalizeEngineUrlInput(this.$("#iqxin-newLink").value);
+        oimg = normalizeEngineIconInput(this.$("#iqxin-newIcon").value);
         oblank = this.$("#iqxin-newTarget").selectedIndex;
-        isCustomIcon = Boolean(oimg);
+        isCustomIcon = Boolean(this.$("#iqxin-newIcon").value.trim());
+
+        if (!otitle) {
+          alert("标题不能为空");
+          return;
+        }
+        if (!olink) {
+          alert("链接格式不正确，仅支持 http/https");
+          return;
+        }
+        if (isCustomIcon && !oimg) {
+          alert("图标格式不正确，仅支持 http/https 或 data:image");
+          return;
+        }
 
         if (!oimg) {
           oimg = this.getICON(olink);
         }
 
-        var a =
-          '<span class="sej-engine"' +
-          ' data-iqxinimg="$img$" ' +
-          "$customIconAttr$" +
-          ' data-iqxintitle="$title$" ' +
-          ' data-iqxinlink="$link$" ' +
-          ' data-iqxintarget="$blank$" ' +
-          '><img class="sej-engine-icon" src="$favicon$" alt="">$name$</span>' +
-          '<span class="iqxin-set-edit" title="编辑 Edit">' +
-          '<img class="sej-engine-icon" src="' +
-          icon.edit +
-          '">' +
-          "</span> " +
-          '<span class="iqxin-set-del iqxin-set-active" title="删除 Delete">' +
-          '<img class="sej-engine-icon" src="' +
-          icon.del +
-          '">' +
-          "</span>";
+        var newEngineRow = this.createEngineRow(
+          {
+            name: otitle,
+            url: olink,
+            favicon: isCustomIcon ? oimg : "",
+            blank: !oblank ? "_blank" : "",
+            customIcon: isCustomIcon ? "true" : "",
+          },
+          this.parentNode.parentNode.id,
+          this.parentNode.querySelectorAll(".sej-engine").length,
+          settingData
+        );
 
-        a = a
-          .replace("$img$", isCustomIcon ? oimg : "")
-          .replace(
-            "$customIconAttr$",
-            isCustomIcon ? ' data-iqxincustomicon="true" ' : ""
-          )
-          .replace("$title$", otitle)
-          .replace(
-            "$link$",
-            olink.indexOf("://") === -1 ? "https://" + olink : olink
-          );
-
-        if (oblank) {
-          a = a.replace('data-iqxintarget="$blank$"', "");
-        } else {
-          a = a.replace("$blank$", "_blank");
-        }
-
-        a = a.replace("$name$", otitle).replace("$favicon$", oimg);
-
-        var ospan = document.createElement("span");
-        ospan.className = "drag";
-        ospan.innerHTML = a;
-
-        this.parentNode.insertBefore(ospan, this.parentNode.lastChild);
+        newEngineRow.querySelector(".iqxin-set-del").classList.add("iqxin-set-active");
+        this.parentNode.insertBefore(newEngineRow, this.parentNode.lastChild);
+        this.dragEvent();
 
         // 添加完成,移除添加框
         this.addItemBoxRemove();
@@ -2044,10 +2338,10 @@ function listenUrlChange() {
         this.$("#iqxin-newSearchListName").focus();
       }
       addSearchListEnger() {
-        var name = this.$("#iqxin-newSearchListName").value;
-        var innerName = this.$(
-          "#iqxin-newSearchListInnerName"
-        ).value;
+        var name = normalizeTextInput(this.$("#iqxin-newSearchListName").value);
+        var innerName = normalizeTextInput(
+          this.$("#iqxin-newSearchListInnerName").value
+        );
 
         if (innerName.length === 0) {
           alert("内部名称不能为空");
@@ -2060,35 +2354,26 @@ function listenUrlChange() {
         var odiv = document.createElement("div");
         odiv.id = innerName;
         odiv.className = "iqxin-items";
-        odiv.innerHTML =
-          "" +
-          '<div class="sejtitle" data-iqxintitle="' +
-          innerName +
-          '" data-xin="99">' +
-          '<span class="iqxin-pointer-events">' +
-          name +
-          "</span>" +
-          '<span class="iqxin-title-edit" title="编辑 Edit">' +
-          '<img class="sej-engine-icon" src="' +
-          icon.edit +
-          '">' +
-          "</span> " +
-          '<span class="iqxin-set-title-del iqxin-set-active" title="删除 Delete">' +
-          '<img class="sej-engine-icon" src="' +
-          icon.del +
-          '">' +
-          "</span>" +
-          "</div>" +
-          '<div class="sejcon">' +
-          '<span class="iqxin-additem iqxin-set-active">+</span>' +
-          "</div>" +
-          "";
+        var titleElement = this.createCategoryTitle([name, innerName, true], 99);
+        titleElement
+          .querySelector(".iqxin-set-title-del")
+          .classList.add("iqxin-set-active");
+        odiv.appendChild(titleElement);
+
+        var contentElement = document.createElement("div");
+        contentElement.className = "sejcon";
+        var addButton = document.createElement("span");
+        addButton.className = "iqxin-additem iqxin-set-active";
+        addButton.textContent = "+";
+        contentElement.appendChild(addButton);
+        odiv.appendChild(contentElement);
 
         // this.boxClose("#newSearchListBox");
         this.addItemBoxRemove("#newSearchListBox");
 
         var btnEle = this.$("#btnEle");
         btnEle.parentNode.insertBefore(odiv, btnEle);
+        this.dragEvent();
       }
 
       boxClose(ele) {
@@ -2102,7 +2387,9 @@ function listenUrlChange() {
       addEditBox(e) {
         this.addItemBoxRemove();
 
-        var target = e.target.parentNode.firstChild;
+        var target =
+          e.target.closest(".iqxin-set-edit")?.parentNode.querySelector(".sej-engine") ||
+          e.target.parentNode.firstChild;
 
         var otitle = target.dataset.iqxintitle;
         var olink = target.dataset.iqxinlink;
@@ -2134,9 +2421,9 @@ function listenUrlChange() {
         // newDiv.style.cssText = "top:"+(e.screenY-120) +"px;left:"+(e.screenX-140) +"px;";
         newDiv.style.cssText = "top:43%;opacity:0.1;";
         var innerHTML = `
-          <span>标&nbsp;&nbsp;&nbsp&nbsp&nbsp&nbsp&nbsp题 : </span><input id="iqxin-newTitle" placeholder="必填" onfocus="this.select()" value="${otitle}" /> <br/><br/>
-          <span>链&nbsp;&nbsp;&nbsp&nbsp&nbsp&nbsp&nbsp接 : </span><input id="iqxin-newLink" placeholder="必填" onfocus="this.select()" value="${olink}" /> <br/><br/>
-          <span>图&nbsp;&nbsp;&nbsp&nbsp&nbsp&nbsp&nbsp标 : </span><input id="iqxin-newIcon" placeholder="选填,留空则自动获取" onfocus="this.select()" value="${ocustom ? oicon : ""}" /> <br/><br/>
+          <span>标&nbsp;&nbsp;&nbsp&nbsp&nbsp&nbsp&nbsp题 : </span><input id="iqxin-newTitle" placeholder="必填" onfocus="this.select()" /> <br/><br/>
+          <span>链&nbsp;&nbsp;&nbsp&nbsp&nbsp&nbsp&nbsp接 : </span><input id="iqxin-newLink" placeholder="必填" onfocus="this.select()" /> <br/><br/>
+          <span>图&nbsp;&nbsp;&nbsp&nbsp&nbsp&nbsp&nbsp标 : </span><input id="iqxin-newIcon" placeholder="选填,留空则自动获取" onfocus="this.select()" /> <br/><br/>
           <span>打开方式 :
               <select id="iqxin-newTarget">
                   ${strblank}
@@ -2152,6 +2439,9 @@ function listenUrlChange() {
         newDiv.innerHTML = innerHTML;
 
         this.ele.appendChild(newDiv);
+        this.$("#iqxin-newTitle").value = otitle;
+        this.$("#iqxin-newLink").value = olink;
+        this.$("#iqxin-newIcon").value = ocustom ? oicon : "";
         setTimeout(function () {
           newDiv.style.cssText = "";
         }, 10);
@@ -2159,16 +2449,29 @@ function listenUrlChange() {
       }
       addEditBoxEnger() {
         var otitle, olink, oimg, oblank, ogbk, isCustomIcon, displayFavicon;
-        otitle = this.$("#iqxin-newTitle").value;
-        olink = this.$("#iqxin-newLink").value;
-        oimg = this.$("#iqxin-newIcon").value;
+        otitle = normalizeTextInput(this.$("#iqxin-newTitle").value);
+        olink = normalizeEngineUrlInput(this.$("#iqxin-newLink").value);
+        oimg = normalizeEngineIconInput(this.$("#iqxin-newIcon").value);
         oblank = this.$("#iqxin-newTarget").selectedIndex;
         ogbk = this.$("#iqxin-newGBK").checked;
-        isCustomIcon = Boolean(oimg);
+        isCustomIcon = Boolean(this.$("#iqxin-newIcon").value.trim());
+
+        if (!otitle) {
+          alert("标题不能为空");
+          return;
+        }
+        if (!olink) {
+          alert("链接格式不正确，仅支持 http/https");
+          return;
+        }
+        if (isCustomIcon && !oimg) {
+          alert("图标格式不正确，仅支持 http/https 或 data:image");
+          return;
+        }
         displayFavicon = oimg || this.getICON(olink);
 
         this.editTemp.dataset.iqxintitle = otitle;
-        this.editTemp.lastChild.innerText = otitle; //文本节点
+        this.editTemp.lastChild.textContent = otitle; //文本节点
 
         this.editTemp.dataset.iqxinlink = olink;
         this.editTemp.dataset.iqxinimg = isCustomIcon ? oimg : "";
@@ -2200,22 +2503,22 @@ function listenUrlChange() {
       addTitleEditBox(e) {
         this.addItemBoxRemove();
 
-        var element = e.target.parentNode.firstChild;
+        var element =
+          e.target.closest(".iqxin-title-edit")?.parentNode.firstChild ||
+          e.target.parentNode.firstChild;
         element.classList.remove("iqxin-pointer-events");
 
         var flag = this.$("#titleEdit");
         // 存在编辑的标题 && 之前的编辑的节点与点击的节点是同一个节点
         if (flag && flag.parentNode == element) {
-          element.innerHTML = element.firstChild.value
-            ? element.firstChild.value
-            : "空";
+          element.textContent = element.firstChild.value ? element.firstChild.value : "空";
           element.classList.add("iqxin-pointer-events");
         } else {
           //  存在编辑的标题,但与点击的不是同一个节点
           if (flag) {
-            flag.parentNode.innerHTML = flag.parentNode.firstChild.value;
+            flag.parentNode.textContent = flag.parentNode.firstChild.value;
           }
-          var oldhtml = element.innerHTML;
+          var oldhtml = element.textContent;
           var newobj = document.createElement("input");
           newobj.id = "titleEdit";
           newobj.type = "text";
@@ -2225,14 +2528,14 @@ function listenUrlChange() {
           // }
           newobj.onkeydown = function (e) {
             if ((e.keyCode || e.which) == 13) {
-              element.innerHTML = this.value ? this.value : oldhtml;
+              element.textContent = this.value ? this.value : oldhtml;
             } else if ((e.keyCode || e.which) == 27) {
-              element.innerHTML = oldhtml;
+              element.textContent = oldhtml;
             }
 
             element.classList.add("iqxin-pointer-events");
           };
-          element.innerHTML = "";
+          element.textContent = "";
           element.appendChild(newobj);
           newobj.select();
         }
@@ -2240,7 +2543,7 @@ function listenUrlChange() {
       addTitleEditBoxRemove() {
         var odiv = this.$("#titleEdit");
         if (odiv) {
-          odiv.parentNode.innerHTML = odiv.value ? odiv.value : "空";
+          odiv.parentNode.textContent = odiv.value ? odiv.value : "空";
         }
       }
 
@@ -2258,22 +2561,19 @@ function listenUrlChange() {
           "background:#ccc;" +
           "border-radius:4px;" +
           "padding:10px 20px;";
-        var innerH =
+        editbox.innerHTML =
           " " +
           "<p><span class='iqxin-warning'>! ! !</span></br>" +
           "此处有更多的设置选项,自由度更高,</br>" +
           "但设置错误会导致脚本无法运行" +
           "</p>" +
-          "<textarea wrap='off' cols='45' rows='20'>" +
-          JSON.stringify(userSetting, false, 4) +
-          "</textarea>" +
+          "<textarea wrap='off' cols='45' rows='20'></textarea>" +
           "<br>" +
           "<button id='xin-reset'>清空设置</button> &nbsp;&nbsp;&nbsp;" +
           "<button id='xin-copyCode'>复制</button> &nbsp;&nbsp;&nbsp;" +
           "<button id='codeboxclose' class='iqxin-closeBtn'>关闭</button> &nbsp;&nbsp;&nbsp;" +
-          "<button id='xin-codeboxsave' class='iqxin-enterBtn'>保存</button>" +
-          "";
-        editbox.innerHTML = innerH;
+          "<button id='xin-codeboxsave' class='iqxin-enterBtn'>保存</button>";
+        editbox.querySelector("textarea").value = JSON.stringify(userSetting, false, 4);
         this.ele.appendChild(editbox);
       }
       editCodeBoxSave() {
@@ -2281,7 +2581,15 @@ function listenUrlChange() {
           "#iqxin-editCodeBox textarea"
         ).value;
         if (codevalue) {
-          GM_setValue("searchEngineJumpData", JSON.parse(codevalue));
+          try {
+            GM_setValue(
+              "searchEngineJumpData",
+              normalizeStoredSettings(JSON.parse(codevalue), scriptSettingData)
+            );
+          } catch (error) {
+            this.showPopUp("配置 JSON 格式不正确", 2500);
+            return;
+          }
           // 刷新页面
           setTimeout(function () {
             location.reload();
@@ -2300,18 +2608,17 @@ function listenUrlChange() {
       // “设置按钮” 透明度
       setBtnOpacityFun() {
         if (~window.navigator.userAgent.indexOf("Chrome")) {
-          var odom = document.querySelector("#setBtnOpacityRange");
+          var odom = this.$("#setBtnOpacityRange");
           var odomV = odom.value;
           // odom.style.backgroundSize = odom.value*100 +"% 100%";
           console.log(odomV, settingData.setBtnOpacity);
           if (settingData.setBtnOpacity < 0) {
-            document.querySelector(".iqxin-setBtnOpacityRangeValue").innerHTML =
+            this.$(".iqxin-setBtnOpacityRangeValue").textContent =
               odomV.toString().padEnd(4, "0");
             odom.style.background =
               "-webkit-linear-gradient(left,#3ABDC1,#83e7ea) no-repeat, #fff";
           } else {
-            document.querySelector(".iqxin-setBtnOpacityRangeValue").innerHTML =
-              "禁用";
+            this.$(".iqxin-setBtnOpacityRangeValue").textContent = "禁用";
             odom.style.background =
               "-webkit-linear-gradient(left,#bdbdbd,#c6c7c7) no-repeat, #fff";
           }
@@ -2335,29 +2642,35 @@ function listenUrlChange() {
       domClick(e) {
         var targetClass = e.target.className;
         var targetid = e.target.id;
+        var deleteButton = e.target.closest?.(".iqxin-set-del");
+        var deleteTitleButton = e.target.closest?.(".iqxin-set-title-del");
+        var addItemButton = e.target.closest?.(".iqxin-additem");
+        var editButton = e.target.closest?.(".iqxin-set-edit");
+        var titleEditButton = e.target.closest?.(".iqxin-title-edit");
 
         // 删除搜索
-        if (~e.target.className.indexOf("iqxin-set-del")) {
+        if (deleteButton) {
           // console.log(e.target);
-          e.target.parentNode.parentNode.removeChild(e.target.parentNode);
+          deleteButton.parentNode.parentNode.removeChild(deleteButton.parentNode);
         }
         // 删除搜索列表
-        if (~e.target.className.indexOf("iqxin-set-title-del")) {
+        if (deleteTitleButton) {
           // console.log(e.target, e.target.parentNode.parentNode);
-          e.target.parentNode.parentNode.parentNode.removeChild(
-            e.target.parentNode.parentNode
+          deleteTitleButton.parentNode.parentNode.parentNode.removeChild(
+            deleteTitleButton.parentNode.parentNode
           );
         }
 
-        if (~e.target.className.indexOf("iqxin-additem")) {
-          this.parentNode = e.target.parentNode;
+        if (addItemButton) {
+          this.parentNode = addItemButton.parentNode;
           this.addItemBox();
         }
-        if (e.target.className === "sej-engine") {
-          e.target.dataset.iqxindisabled = e.target.dataset.iqxindisabled
+        if (e.target.closest?.(".sej-engine") && e.target.closest(".sej-engine").className === "sej-engine") {
+          const engineElement = e.target.closest(".sej-engine");
+          engineElement.dataset.iqxindisabled = engineElement.dataset.iqxindisabled
             ? ""
             : "true";
-          e.target.dataset.iqxindisabled
+          engineElement.dataset.iqxindisabled
             ? this.showPopUp("禁用")
             : this.showPopUp("启用");
         }
@@ -2385,11 +2698,11 @@ function listenUrlChange() {
         }
 
         // 编辑框
-        if (~e.target.className.indexOf("iqxin-set-edit")) {
+        if (editButton) {
           this.addEditBox(e);
         }
         // 标题编辑框
-        if (~targetClass.indexOf("iqxin-title-edit")) {
+        if (titleEditButton) {
           e.stopPropagation();
           this.addTitleEditBox(e);
         }
@@ -2449,6 +2762,7 @@ function listenUrlChange() {
 
       // 窗口位置拖动
       setDragNode(ele) {
+        var panel = this;
         var node = this.$("#dragDom");
 
         node.addEventListener("mousedown", function (event) {
@@ -2464,10 +2778,16 @@ function listenUrlChange() {
             ele.style.top = event.clientY - disY + "px";
           };
 
-          document.addEventListener("mousemove", move);
-          document.addEventListener("mouseup", function () {
+          removeManagedListeners(panel.dragDocumentCleanup);
+          addManagedListener(
+            panel.dragDocumentCleanup,
+            document,
+            "mousemove",
+            move
+          );
+          addManagedListener(panel.dragDocumentCleanup, document, "mouseup", function () {
             ele.style.transition = "0.5s";
-            document.removeEventListener("mousemove", move);
+            removeManagedListeners(panel.dragDocumentCleanup);
           });
         });
       }
@@ -2587,19 +2907,7 @@ function listenUrlChange() {
 
       // 重新加载工具
       reloadSet() {
-        const shadowRoot = ShadowDOMManager.getRoot();
-        var elems = shadowRoot.querySelectorAll(
-          "#sej-container, #settingLayerMask, sejspan.sej-drop-list"
-        );
-        if (!elems) return;
-        console.log("elems: " + elems);
-        // return;
-
-        [].forEach.call(elems, function (elem) {
-          elem.parentNode.removeChild(elem);
-        });
-
-        mainLogic();
+        restartCurrentRuntime();
         this.showPopUp("保存成功");
       }
 
@@ -2610,8 +2918,7 @@ function listenUrlChange() {
           odom.style.background =
             "-webkit-linear-gradient(left,#bdbdbd,#c6c7c7) no-repeat, #fff";
           odom.style.backgroundSize = odom.value * 100 + "% 100%";
-          this.$(".iqxin-setBtnOpacityRangeValue").innerHTML =
-            "禁用";
+          this.$(".iqxin-setBtnOpacityRangeValue").textContent = "禁用";
           settingData.setBtnOpacity = -odom.value;
         } else {
           odom.style.background =
@@ -2626,8 +2933,7 @@ function listenUrlChange() {
           } else {
             valueStr = odom.value.toString().padEnd(4, "0");
           }
-          this.$(".iqxin-setBtnOpacityRangeValue").innerHTML =
-            valueStr;
+          this.$(".iqxin-setBtnOpacityRangeValue").textContent = valueStr;
           settingData.setBtnOpacity = odom.value;
         }
       }
@@ -2694,7 +3000,9 @@ function listenUrlChange() {
         var odetailsLength = odetails.length;
         for (let i = 0; i < odetailsLength; i++) {
           engineDetails[i] = [];
-          engineDetails[i][0] = odetails[i].firstChild.innerHTML;
+          engineDetails[i][0] =
+            odetails[i].querySelector(".iqxin-title-label")?.textContent ||
+            odetails[i].firstChild.textContent;
           engineDetails[i][1] = odetails[i].dataset.iqxintitle;
           engineDetails[i][2] = odetails[i].dataset.xin >= 0 ? true : false;
         }
@@ -2706,7 +3014,10 @@ function listenUrlChange() {
         var foldlist = this.$("#iqxin-foldlist").checked;
 
         // 以防不测,重新获取本地配置文件
-        var getData = GM_getValue("searchEngineJumpData");
+        var getData = normalizeStoredSettings(
+          GM_getValue("searchEngineJumpData"),
+          scriptSettingData
+        );
         getData.newtab = onewtab;
         getData.foldlist = foldlist;
         getData.setBtnOpacity = settingData.setBtnOpacity;
@@ -2754,6 +3065,11 @@ function listenUrlChange() {
       }
       showPopUp(text, duration) {
         new PopUp(text, duration);
+      }
+      destroy() {
+        removeManagedListeners(this.dragDocumentCleanup);
+        removeManagedListeners(this.listenerCleanup);
+        this.mask.remove();
       }
     }
 
@@ -2996,8 +3312,17 @@ function listenUrlChange() {
     const style = new Style();
 
     const jumpBar = new JumpBar(engineList, settingData, matchedRule);
+    let settingButton = null;
     if (jumpBar.container) {
-      new SettingButton(jumpBar.container, settingData);
+      settingButton = new SettingButton(jumpBar.container, settingData);
+      currentRuntime = {
+        jumpBar,
+        settingButton,
+        destroy() {
+          settingButton?.destroy?.();
+          jumpBar?.destroy?.();
+        },
+      };
     } else {
       return;
     }

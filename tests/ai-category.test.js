@@ -80,7 +80,7 @@ assert.match(
 );
 assert.match(
   userScriptSource,
-  /data-iqxincustomicon=/,
+  /dataset\.iqxincustomicon|customIcon:\s*isCustomIcon\s*\?\s*"true"/,
   "settings panel DOM should persist whether an icon is custom"
 );
 assert.doesNotMatch(
