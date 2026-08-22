@@ -3,9 +3,9 @@
 // @author         NLF & 锐经(修改) & iqxin(修改) & MUTED64(修改)
 // @contributor    MUTED64
 // @description    Fork版本搜索引擎跳转脚本，优化一些使用体验
-// @version        5.33.5
+// @version        5.33.6
 // @created        2011-07-02
-// @lastUpdated    2026-04-25
+// @lastUpdated    2026-08-22
 
 // @namespace      https://greasyfork.org/en/scripts/454280-searchenginejumpplus
 // @homepage       https://github.com/xiaoancute/SearchEngineJumpPlus
@@ -93,7 +93,7 @@
     }
     
     static addStyle(cssText) {
-      if (!cssText) return;
+      if (!cssText) return null;
       if (!this.shadowRoot) this.initialize();
 
       if (this.#supportsConstructableStylesheets()) {
@@ -105,7 +105,7 @@
             ...this.shadowRoot.adoptedStyleSheets,
             sheet,
           ];
-          return;
+          return sheet;
         } catch (e) {
           console.warn("Constructable stylesheet 注入失败，回退到 <style> 注入", e);
         }
@@ -118,6 +118,28 @@
       }
       style.textContent = cssText;
       this.shadowRoot.appendChild(style);
+      return style;
+    }
+
+    static removeSheet(handle) {
+      if (!handle || !this.shadowRoot) {
+        return;
+      }
+
+      if (
+        typeof CSSStyleSheet !== "undefined" &&
+        handle instanceof CSSStyleSheet
+      ) {
+        this.shadowRoot.adoptedStyleSheets = this.shadowRoot.adoptedStyleSheets.filter(
+          (sheet) => sheet !== handle
+        );
+        this.constructableSheets = this.constructableSheets.filter(
+          (sheet) => sheet !== handle
+        );
+        return;
+      }
+
+      handle.parentNode?.removeChild(handle);
     }
 
     static #supportsConstructableStylesheets() {
@@ -667,9 +689,48 @@ function listenUrlChange() {
         return engine.favicon || autoFavicon || "";
       }
 
+      // 分类启用状态通过键的负号编码（"3" 启用 / "-3" 禁用）。
+      // 必须用字符串 "-0" 而不是数值 -0：数组会把 -0 归一化成 "0"，覆盖启用槽位。
+      function categoryStorageKey(index, enabled) {
+        return enabled ? index : "-" + index;
+      }
+
+      function isCategoryKeyEnabled(key) {
+        return !String(key ?? "").startsWith("-");
+      }
+
+      function flipCategoryKey(key) {
+        const normalized = String(key ?? "0");
+        return isCategoryKeyEnabled(normalized)
+          ? "-" + normalized
+          : normalized.slice(1);
+      }
+
+      function resolveCategoryEntry(categoryMap, index) {
+        const enabledItem = categoryMap[index];
+        if (enabledItem) {
+          return { item: enabledItem, key: String(index) };
+        }
+
+        const disabledKey = "-" + index;
+        const disabledItem = categoryMap[disabledKey];
+        return disabledItem ? { item: disabledItem, key: disabledKey } : null;
+      }
+
+      // 运行时克隆规则对象，避免对 style/fixedTop 的修改污染全局 rules 数据，
+      // 保证 SPA 切换页面重新初始化时拿到的是原始规则。
+      function cloneMatchedRuleForRuntime(rule) {
+        return rule ? { ...rule } : null;
+      }
+
       return {
         addManagedListener,
         buildBuiltInEngineLookup,
+        categoryStorageKey,
+        cloneMatchedRuleForRuntime,
+        flipCategoryKey,
+        isCategoryKeyEnabled,
+        resolveCategoryEntry,
         buildFaviconUrl,
         deepCloneData,
         findBuiltInEngineDefault,
@@ -694,14 +755,19 @@ function listenUrlChange() {
     const {
       addManagedListener,
       buildFaviconUrl,
+      categoryStorageKey,
+      cloneMatchedRuleForRuntime,
       deepCloneData,
       findBuiltInEngineDefault,
+      flipCategoryKey,
       hasCustomEngineIcon,
+      isCategoryKeyEnabled,
       normalizeEngineIconInput,
       normalizeEngineUrlInput,
       normalizeStoredSettings,
       normalizeTextInput,
       removeManagedListeners,
+      resolveCategoryEntry,
       resolveEngineFavicon,
     } = coreHelpers;
     // --------------------可设置项结束------------------------
@@ -985,26 +1051,19 @@ function listenUrlChange() {
       }
 
       initEngineCategories() {
-        this.settingData.engineList.engineCategories = [];
-        for (
-          let engineCategoryIndex = 0;
-          engineCategoryIndex < this.settingData.engineDetails.length;
-          engineCategoryIndex++
-        ) {
-          if (this.settingData.engineDetails[engineCategoryIndex][2]) {
-            this.settingData.engineList.engineCategories[engineCategoryIndex] =
-              this.settingData.engineDetails[engineCategoryIndex];
-          } else {
-            this.settingData.engineList.engineCategories[-engineCategoryIndex] =
-              this.settingData.engineDetails[engineCategoryIndex];
-          }
-        }
+        // 禁用分类用字符串键 "-i" 存储；不能用数值 -i，
+        // 因为数组会把 -0 归一化成 "0"，覆盖第 0 个启用分类。
+        const engineCategories = [];
+        this.settingData.engineDetails.forEach((detailItem, index) => {
+          engineCategories[categoryStorageKey(index, detailItem[2])] = detailItem;
+        });
+        this.settingData.engineList.engineCategories = engineCategories;
       }
 
       getMatchedRule() {
         for (const rule of [...rules]) {
           if (rule.url.test(location.href)) {
-            return rule;
+            return cloneMatchedRuleForRuntime(rule);
           }
         }
         return null;
@@ -1106,7 +1165,7 @@ function listenUrlChange() {
           } else {
             var style = list.style;
             style.top = parseFloat(list.style.top) - 6 + "px";
-            style.zIndex = this.zIndex + 1;
+            style.zIndex = self.zIndex + 1;
             style.opacity = 1;
           }
         });
@@ -1128,7 +1187,7 @@ function listenUrlChange() {
           clearTimeout(self.hideTimerId);
 
           var style = list.style;
-          style.zIndex = this.zIndex + 1;
+          style.zIndex = self.zIndex + 1;
           style.opacity = 1;
           style.top = parseFloat(list.style.top) - 6 + "px";
         });
@@ -1145,7 +1204,6 @@ function listenUrlChange() {
         if (!this.hidden) return;
         this.hidden = false;
 
-        var scrolled = this.#getScrolled();
         var aBCRect = this.a.getBoundingClientRect();
 
         var style = this.list.style;
@@ -1180,29 +1238,6 @@ function listenUrlChange() {
         style.opacity = 0.2;
 
         this.a.classList.remove(this.aShownClass);
-      }
-      // 获取已滚动的距离
-      #getScrolled(container) {
-        if (container) {
-          return {
-            x: container.scrollLeft,
-            y: container.scrollTop,
-          };
-        }
-        return {
-          x:
-            "scrollX" in window
-              ? window.scrollX
-              : "pageXOffset" in window
-              ? window.pageXOffset
-              : document.documentElement.scrollLeft || document.body.scrollLeft,
-          y:
-            "scrollY" in window
-              ? window.scrollY
-              : "pageYOffset" in window
-              ? window.pageYOffset
-              : document.documentElement.scrollTop || document.body.scrollTop,
-        };
       }
     }
 
@@ -1584,12 +1619,12 @@ function listenUrlChange() {
         }
 
         //兼容ac百度中lite选项, fixedtop和正常的不一样
-        setTimeout(function () {
+        setTimeout(() => {
           if (
             document.querySelector(".AC-baiduLiteStyle") &&
-            matchedRule.fixedTop2
+            this.matchedRule?.fixedTop2
           ) {
-            matchedRule.fixedTop = matchedRule.fixedTop2;
+            this.matchedRule.fixedTop = this.matchedRule.fixedTop2;
           }
         }, 2500);
 
@@ -1896,12 +1931,26 @@ function listenUrlChange() {
             return;
           }
           odiv.dataset.iqxinDragBound = "true";
-          odiv.addEventListener("dragstart", that.domdragstart, false);
-          odiv.addEventListener("dragenter", that.domdragenter, false);
-          odiv.addEventListener("dragover", that.domdragover, false);
-          odiv.addEventListener("dragleave", that.domdragleave, false);
-          odiv.addEventListener("drop", that.domdrop, false);
-          odiv.addEventListener("dragend", that.domdropend, false);
+          // domdragstart 依赖元素上下文（this.className），其余处理程序需要面板实例，
+          // 统一用闭包显式指定，避免依赖 addEventListener 的默认 this。
+          odiv.addEventListener("dragstart", function (e) {
+            that.domdragstart.call(odiv, e);
+          }, false);
+          odiv.addEventListener("dragenter", function (e) {
+            that.domdragenter(e);
+          }, false);
+          odiv.addEventListener("dragover", function (e) {
+            that.domdragover(e);
+          }, false);
+          odiv.addEventListener("dragleave", function (e) {
+            that.domdragleave(e);
+          }, false);
+          odiv.addEventListener("drop", function (e) {
+            that.domdrop(e);
+          }, false);
+          odiv.addEventListener("dragend", function () {
+            that.domdropend();
+          }, false);
         });
       }
       createActionIcon(className, title, iconSource) {
@@ -1992,22 +2041,22 @@ function listenUrlChange() {
         // var detailsLength = details.length;
         var detailsLength = 99;
         for (let i = 0; i < detailsLength; i++) {
-          var j = i;
-          j = details[j] ? j : -j;
-          if (!details[j]) {
+          var entry = resolveCategoryEntry(details, i);
+          if (!entry) {
             break;
           }
+          var j = entry.key;
 
           var odiv = document.createElement("div");
-          odiv.id = details[j][1]; // "web"
+          odiv.id = entry.item[1]; // "web"
           odiv.classList.add("iqxin-items");
 
-          var oDivTitle = this.createCategoryTitle(details[j], j);
+          var oDivTitle = this.createCategoryTitle(entry.item, j);
           odiv.appendChild(oDivTitle);
 
           var oDivCon = document.createElement("div");
           oDivCon.classList.add("sejcon");
-          var engineListItem = engineList[details[j][1]];
+          var engineListItem = engineList[entry.item[1]];
           var itemLength = engineListItem.length;
           for (let ii = 0; ii < itemLength; ii++) {
             var jj = ii;
@@ -2017,7 +2066,7 @@ function listenUrlChange() {
             oDivCon.appendChild(
               this.createEngineRow(
                 engineListItem[jj],
-                details[j][1],
+                entry.item[1],
                 jj,
                 settingData
               )
@@ -2633,8 +2682,8 @@ function listenUrlChange() {
       // 标题点击 （开关搜索列表）（可以并入到下面的点击事件）
       titleClick(e) {
         var target = e.target;
-        target.dataset.xin = -parseInt(target.dataset.xin);
-        target.dataset.xin > 0
+        target.dataset.xin = flipCategoryKey(target.dataset.xin);
+        isCategoryKeyEnabled(target.dataset.xin)
           ? this.showPopUp("启用")
           : this.showPopUp("禁用");
       }
@@ -2831,7 +2880,7 @@ function listenUrlChange() {
         var pparentNode = that.parentNode;
 
         // 防止跨区域移动
-        SettingPanel.prototype.domdropend();
+        this.domdropend();
         if (SettingPanel.dragEl.className != that.className) {
           console.log("移动对象 之前,现在: ", SettingPanel.dragEl.className);
           console.log(that.className);
@@ -2874,7 +2923,7 @@ function listenUrlChange() {
         }
 
         // 重新绑定拖拽事件
-        SettingPanel.prototype.dragEvent();
+        this.dragEvent();
         return false;
       }
       domdropend() {
@@ -2901,6 +2950,7 @@ function listenUrlChange() {
             that.online = true;
           } else {
             myImage.src = undefined;
+            that.online = false;
           }
         }, 2000);
       }
@@ -2968,26 +3018,21 @@ function listenUrlChange() {
           var id = parentdiv[i].id;
           obj[id] = [];
           for (let ii = 0; ii < data.length; ii++) {
-            if (data[ii].dataset.xin < 0) {
-              var ij = -ii;
-            } else {
-              ij = ii;
-            }
-            obj[id][ij] = {};
-            obj[id][ij].favicon = data[ii].dataset.iqxinimg;
-            obj[id][ij].name = data[ii].dataset.iqxintitle;
-            obj[id][ij].url = data[ii].dataset.iqxinlink;
+            obj[id][ii] = {};
+            obj[id][ii].favicon = data[ii].dataset.iqxinimg;
+            obj[id][ii].name = data[ii].dataset.iqxintitle;
+            obj[id][ii].url = data[ii].dataset.iqxinlink;
             if (data[ii].dataset.iqxincustomicon) {
-              obj[id][ij].customIcon = data[ii].dataset.iqxincustomicon;
+              obj[id][ii].customIcon = data[ii].dataset.iqxincustomicon;
             }
             if (data[ii].dataset.iqxintarget) {
-              obj[id][ij].blank = data[ii].dataset.iqxintarget;
+              obj[id][ii].blank = data[ii].dataset.iqxintarget;
             }
             if (data[ii].dataset.iqxindisabled) {
-              obj[id][ij].disable = data[ii].dataset.iqxindisabled;
+              obj[id][ii].disable = data[ii].dataset.iqxindisabled;
             }
             if (data[ii].dataset.iqxingbk) {
-              obj[id][ij].gbk = data[ii].dataset.iqxingbk;
+              obj[id][ii].gbk = data[ii].dataset.iqxingbk;
             }
           }
         }
@@ -3004,7 +3049,7 @@ function listenUrlChange() {
             odetails[i].querySelector(".iqxin-title-label")?.textContent ||
             odetails[i].firstChild.textContent;
           engineDetails[i][1] = odetails[i].dataset.iqxintitle;
-          engineDetails[i][2] = odetails[i].dataset.xin >= 0 ? true : false;
+          engineDetails[i][2] = isCategoryKeyEnabled(odetails[i].dataset.xin);
         }
 
         // 新标签页全局设置
@@ -3070,6 +3115,8 @@ function listenUrlChange() {
         removeManagedListeners(this.dragDocumentCleanup);
         removeManagedListeners(this.listenerCleanup);
         this.mask.remove();
+        // 面板可能在打开状态下被销毁（如 SPA 切页），恢复页面滚动
+        document.body.style.overflow = "";
       }
     }
 
@@ -3098,6 +3145,9 @@ function listenUrlChange() {
     }
 
     class Style {
+      darkModeSheet = null;
+      listenerCleanup = [];
+
       constructor() {
         this.globalStyle = GM_getResourceText("GLOBAL_STYLE");
         this.nonTransitionStyle = `.sej-engine,.sej-drop-list-trigger,.sej-drop-list{transition:none!important;}#sej-container{animation:none!important;}.sej-drop-list {backdrop-filter:none!important;}`;
@@ -3128,7 +3178,7 @@ function listenUrlChange() {
       }
       
       addStyle(style) {
-        ShadowDOMManager.addStyle(style);
+        return ShadowDOMManager.addStyle(style);
       }
       
       /**
@@ -3139,14 +3189,18 @@ function listenUrlChange() {
           this.applyDarkModeStyles();
         }
       }
-      
+
       /**
        * 应用深色模式样式
        */
       applyDarkModeStyles() {
+        // 幂等：避免系统主题来回切换时样式表无限累积
+        if (this.darkModeSheet) {
+          return;
+        }
         // 在 Shadow DOM 中设置暗黑模式样式
         // 使用 :root 和 :host 确保在 Shadow DOM 中生效
-        this.addStyle(`
+        this.darkModeSheet = this.addStyle(`
           :root,
           :host {
             --font-color-qxin: #bdc1bc;
@@ -3163,7 +3217,18 @@ function listenUrlChange() {
           }
         `);
       }
-      
+
+      /**
+       * 移除深色模式样式（系统切回浅色时调用）
+       */
+      removeDarkModeStyles() {
+        if (!this.darkModeSheet) {
+          return;
+        }
+        ShadowDOMManager.removeSheet(this.darkModeSheet);
+        this.darkModeSheet = null;
+      }
+
       /**
        * 监听深色模式变化
        */
@@ -3171,21 +3236,21 @@ function listenUrlChange() {
         // 1. 监听系统深色模式偏好变化（性能影响极小）
         if (window.matchMedia) {
           const darkModeQuery = window.matchMedia('(prefers-color-scheme: dark)');
-          
+          this.lastDarkModeState = darkModeQuery.matches;
+
           const handleChange = (e) => {
             if (e.matches !== this.lastDarkModeState) {
               this.lastDarkModeState = e.matches;
               if (this.isDarkMode()) {
                 this.applyDarkModeStyles();
+              } else {
+                this.removeDarkModeStyles();
               }
             }
           };
-          
-          if (darkModeQuery.addEventListener) {
-            darkModeQuery.addEventListener('change', handleChange);
-          } else if (darkModeQuery.addListener) {
-            darkModeQuery.addListener(handleChange);
-          }
+
+          // 通过托管清理注册，运行时销毁时自动解除，避免重启后泄漏
+          addManagedListener(this.listenerCleanup, darkModeQuery, 'change', handleChange);
         }
       }
       
@@ -3303,28 +3368,41 @@ function listenUrlChange() {
         
         return false;
       }
+
+      destroy() {
+        removeManagedListeners(this.listenerCleanup);
+      }
     }
 
     const settings = new Settings();
     const settingData = settings.settingData;
     engineList = settingData.engineList;
     const matchedRule = settings.getMatchedRule();
-    const style = new Style();
+    const appStyle = new Style();
 
     const jumpBar = new JumpBar(engineList, settingData, matchedRule);
     let settingButton = null;
-    if (jumpBar.container) {
-      settingButton = new SettingButton(jumpBar.container, settingData);
+    if (!jumpBar.container) {
+      // 即使跳过跳转栏初始化，也要登记可销毁的运行时，
+      // 确保 urlchange 重启时能清理样式监听等资源
       currentRuntime = {
-        jumpBar,
-        settingButton,
+        style: appStyle,
         destroy() {
-          settingButton?.destroy?.();
-          jumpBar?.destroy?.();
+          appStyle?.destroy?.();
         },
       };
-    } else {
       return;
     }
+    settingButton = new SettingButton(jumpBar.container, settingData);
+    currentRuntime = {
+      jumpBar,
+      settingButton,
+      style: appStyle,
+      destroy() {
+        settingButton?.destroy?.();
+        jumpBar?.destroy?.();
+        appStyle?.destroy?.();
+      },
+    };
   }
 })();
